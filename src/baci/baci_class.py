@@ -38,15 +38,15 @@ class baci:
         df1.rename(columns={'t': 'Year', 'i': 'Exporter', 'j': 'Importer', 'k': 'Product', 'v': 'Value', 'q': 'Quantity'}, inplace=True)
 
         # replace number with name of country exporter
-        iso1 = pd.read_csv(r"src\baci\data\country_codes_V202301.csv", usecols=['country_code', 'iso_3digit_alpha'])
+        iso1 = pd.read_csv(r"src\baci\data\country_codes_V202401.csv", usecols=['country_code', 'country_iso3'])
         df1 = df1.merge(iso1, left_on="Exporter", right_on="country_code", how="left")
         df1.drop(columns=['country_code', 'Exporter'], inplace = True)
-        df1.rename(columns={"iso_3digit_alpha": "Exporter"}, inplace=True)
+        df1.rename(columns={"country_iso3": "Exporter"}, inplace=True)
     
         # replace number with name of country importer
         df1 = df1.merge(iso1, left_on="Importer", right_on="country_code", how="left")
         df1.drop(columns=['country_code', 'Importer'], inplace = True)
-        df1.rename(columns={"iso_3digit_alpha": "Importer"}, inplace=True)
+        df1.rename(columns={"country_iso3": "Importer"}, inplace=True)
 
         return df1
 
@@ -69,7 +69,6 @@ class baci:
     def subsetStrategicGoods(self, data, strategicProducts: list):
         df1 = data.copy()
         df2 = df1[df1['Product'].isin(strategicProducts)]
-    
         return df2
 
     def addshortdescriptoProdname(self, data):
@@ -138,12 +137,11 @@ class baci:
 
         return out
 
-# ININTIALIZE
+# ININTIALIZE object
 bc1 = baci()
 
 def GDPData():
     data = pd.read_csv(r"src\\baci\\data\\GDP_CurrentUSDollars.csv", index_col=[0])
-    print(data)
     return data
 gdp1 = GDPData()
 
@@ -153,28 +151,33 @@ def getStrategicGoods():
     return data
 
 STRATEGOODS = getStrategicGoods()
-print(STRATEGOODS)
 
 def allWorldImports():
-    yearsData = np.arange(1995, 2022, step=1)
+    yearsData = np.arange(1995, 2023, step=1)
     yearly = []
     for i in yearsData:
         print(i)
-        bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202301\BACI_HS92_Y" + str(i) + "_V202301.csv"
+        bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y" + str(i) + "_V202401.csv"
         df1 = bc1.readindata(bacidata, tmp_save=True)
         
-        # subset on strategic goods
-        df1 = bc1.subsetStrategicGoods(df1, STRATEGOODS)
-
         # doesn't make sense/impossible to distinguish between imports and exports
         trade_world_value = df1['Value'].sum()
         trade_world_quantity = df1['Quantity'].sum()
         year  = df1['Year'].tolist()[0]
-   
-        yearly.append([year, trade_world_value, trade_world_quantity])
+
+        # subset on strategic goods
+        st1 = bc1.subsetStrategicGoods(df1, STRATEGOODS)
+
+        # doesn't make sense/impossible to distinguish between imports and exports
+        strategic_world_value = st1['Value'].sum()
+        strategic_world_quantity = st1['Quantity'].sum()
+        year  = st1['Year'].tolist()[0]
+
+        strategic_world_quantity = st1['Quantity'].sum()
+        yearly.append([year, trade_world_value, trade_world_quantity, strategic_world_value, strategic_world_quantity])
 
     data = pd.DataFrame(yearly)
-    data.columns = ['Year', 'trade_world_value', 'trade_world_quantity']
+    data.columns = ['Year', 'trade_world_value', 'trade_world_quantity', 'strategic_world_value', 'strategic_world_quantity']
     data.set_index('Year', inplace=True)
 
     return data
@@ -187,15 +190,60 @@ def allWorldImports():
 # data.to_csv("World.csv")
 # plt.show()
 
-world = pd.read_csv("World.csv")
-print(world)
+# world = pd.read_csv("World.csv")
+# print(world)
+
+# world[['trade_world_value', 'trade_world_quantity', 'strategic_world_value', 'strategic_world_quantity']].plot()
+# plt.show()
+
+# are there countries in which trade of strategic goods has grown relative to their trade
+
+
+def relativeIncreasePerCountry():
+    yearsData = np.arange(1995, 2023, step=1)
+    allyears = []
+    for i in yearsData:
+        print(i)
+        bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y" + str(i) + "_V202401.csv"
+        df1 = bc1.readindata(bacidata, tmp_save=True)
+        countries_import = df1['Importer'].unique()
+
+        allstates = []
+        for j in countries_import:
+            st = df1[df1['Importer'] == j]
+        
+            # doesn't make sense/impossible to distinguish between imports and exports
+            st_value = st['Value'].sum()
+            st_quantity = st['Quantity'].sum()
+            year  = st['Year'].tolist()[0]
+
+            # subset on strategic goods
+            st_strat = bc1.subsetStrategicGoods(st, STRATEGOODS)
+
+            # doesn't make sense/impossible to distinguish between imports and exports
+            st_strategic_value = st_strat['Value'].sum()
+            st_strategic_quantity = st_strat['Quantity'].sum()
+        
+            allstates.append([year, j, st_value, st_quantity, st_strategic_value, st_strategic_quantity])     
+                
+        data = pd.DataFrame(allstates)
+        data.columns = ['Year', 'state', 'state_value', 'state_quantity', 'strategic_state_value', 'strategic_state_quantity']
+        data.set_index('Year', inplace=True)
+    
+        allyears.append(data)
+    
+    return allyears
+
+xx = relativeIncreasePerCountry()
+ccc = pd.concat(xx)
+ccc.to_csv("xxxx.csv")
 
 def allDutchImports():
     yearsData = np.arange(1995, 2022, step=1)
     yearly = []
     for i in yearsData:
         print(i)
-        bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202301\BACI_HS92_Y" + str(i) + "_V202301.csv"
+        bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_V202401\BACI_HS92_Y" + str(i) + "_V202401.csv"
         df1 = bc1.readindata(bacidata, tmp_save=True)
         
         # subset on strategic goods
@@ -234,7 +282,7 @@ def DutchImportsValuePerProd():
     yearly = []
     for i in yearsData:
         print(i)
-        bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202301\BACI_HS92_Y" + str(i) + "_V202301.csv"
+        bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_V202401\BACI_HS92_Y" + str(i) + "_V202401.csv"
         df1 = bc1.readindata(bacidata, tmp_save=True)
         df2 = bc1.subsetData(df1, ["NLD"], 'Importer', [])
         
@@ -262,19 +310,19 @@ def DutchImportsValuePerProd():
 # print(xxx)
 # xxx.to_csv("tmp100.csv")
 
-data = pd.read_csv("tmp100.csv", index_col=[0])
-data1 = data.T
-print(data1)
-data1.to_csv("tmp3.csv")
-data1.plot()
-plt.show()
+# data = pd.read_csv("tmp100.csv", index_col=[0])
+# data1 = data.T
+# print(data1)
+# data1.to_csv("tmp3.csv")
+# data1.plot()
+# plt.show()
 
 def allDutchGreenTransition():
     yearsData = np.arange(1995, 2022, step=1)
     yearly = []
     for i in yearsData:
         print(i)
-        bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202301\BACI_HS92_Y" + str(i) + "_V202301.csv"
+        bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_V202401\BACI_HS92_Y" + str(i) + "_V202401.csv"
         df1 = bc1.readindata(bacidata, tmp_save=True)
         df2 = bc1.subsetData(df1, ["NLD"], 'Importer', [])
 
@@ -311,7 +359,7 @@ def getSpecificImports(product):
     yearly = []
     for i in yearsData:
         print(i)
-        bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202301\BACI_HS92_Y" + str(i) + "_V202301.csv"
+        bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_V202401\BACI_HS92_Y" + str(i) + "_V202401.csv.csv"
         df1 = bc1.readindata(bacidata, tmp_save=True)
         df2 = bc1.subsetData(df1, ["NLD"], 'Importer', [])
         print("Number of unique products: ", len(df2['Product'].unique()))
@@ -343,7 +391,7 @@ def getSpecificImportsforHS17_Y202Data(product):
 
     assert isinstance(product, int)
  
-    bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS17_V202301\\BACI_HS17_Y2021_V202301.csv"
+    bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS17_V202401\\BACI_HS17_Y2022_V202401.csv"
     df1 = bc1.readindata(bacidata, tmp_save=True)
     df2 = bc1.subsetData(df1, ["NLD"], 'Importer', [])
     print("Number of unique products: ", len(df2['Product'].unique()))
@@ -361,7 +409,7 @@ def getSpecificImportsforHS17_Y202Data(product):
 
 def allDutchGreenTransitionOneYear(year):
    
-    bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202301\BACI_HS92_Y" + str(year) + "_V202301.csv"
+    bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y" + str(year) + "_V202401.csv"
     df1 = bc1.readindata(bacidata, tmp_save=True)
     df2 = bc1.subsetData(df1, ["NLD"], 'Importer', [])
     
@@ -647,10 +695,10 @@ def step1_original(data: pd.DataFrame):
 import numpy as np
 
 def test_baci():
-    df1 = pd.read_csv(DATA_DIR + 'BACI_HS17_Y2021_V202301.csv', usecols=['t', 'i', 'j', 'k', 'v', 'q'])
+    df1 = pd.read_csv(DATA_DIR + 'BACI_HS17_Y2021_V202401.csv', usecols=['t', 'i', 'j', 'k', 'v', 'q'])
     numberrows = df1.shape[0]; print(numberrows)
 
-    # df1 = pd.read_csv(DATA_DIR + 'BACI_HS17_Y2017_V202301.csv', usecols=['i', 'j', 'k', 'v'])
+    # df1 = pd.read_csv(DATA_DIR + 'BACI_HS17_Y2017_V202401.csv', usecols=['i', 'j', 'k', 'v'])
 
     # rename columns to make them meaningful
     df1.rename(columns={'t': 'Year', 'i': 'Exporter', 'j': 'Importer', 'k': 'Product', 'v': 'Value', 'q': 'Quantity'}, inplace=True)
@@ -750,7 +798,7 @@ def attach_product_codes(data):
     dt1 = dutch_imports_per_product(data)
 
     # attach name of product
-    codes = pd.read_csv(DATA_DIR + 'product_codes_HS17_V202301.csv')
+    codes = pd.read_csv(DATA_DIR + 'product_codes_HS17_V202401.csv')
 
     codes["code"] = codes[["code"]].astype(int)
 
