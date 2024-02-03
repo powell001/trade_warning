@@ -234,9 +234,42 @@ def relativeIncreasePerCountry():
     
     return allyears
 
-xx = relativeIncreasePerCountry()
-ccc = pd.concat(xx)
-ccc.to_csv("xxxx.csv")
+# relativeCountry = relativeIncreasePerCountry()
+# relativeCountry = pd.concat(relativeCountry)
+# relativeCountry.to_csv("relativeCountry.csv")
+
+df1 = pd.read_csv("xxxx.csv")
+# print(df1)
+
+# g1 = df1[['state', 'state_value', 'strategic_state_value']].groupby(['state']).mean()
+# g1['state_nonstrategic'] = g1['state_value'] - g1['strategic_state_value']
+# g1.sort_values(['state_value'], inplace=True)
+# print(g1)
+
+# g1 = g1.iloc[-24:,:]
+# ax = g1[['strategic_state_value', 'state_nonstrategic']].plot.bar(stacked=True, rot=0, cmap='tab20', figsize=(10, 7))
+# ax.legend(bbox_to_anchor=(1.01, 1.02), loc='upper left')
+# plt.tight_layout()
+# ax.set_title("Value of Imports (Strategic vs Non-Strategic)")
+# plt.show()
+
+#############
+# percentage
+#############
+g2 = df1[['state', 'state_value', 'strategic_state_value']].groupby(['state']).mean()
+g2['percentage_strategic'] = g2['strategic_state_value']/g2['state_value']
+g2['percentage_non_strategic'] = (g2['state_value'] - g2['strategic_state_value'])/g2['state_value']
+g2.sort_values(['percentage_strategic'], inplace=True)
+print(g2)
+
+g2 = g2[g2['state_value'] >= 1e6]
+g2 = g2.iloc[-24:,:]
+ax = g2[['percentage_strategic', 'percentage_non_strategic']].plot.bar(stacked=True, rot=0, cmap='tab20', figsize=(10, 7))
+ax.legend(bbox_to_anchor=(1.01, 1.02), loc='upper left')
+plt.tight_layout()
+ax.set_title("Percentage of Strategic Imports (Strategic vs Non-Strategic), trade value >= 1e6")
+plt.show()
+
 
 def allDutchImports():
     yearsData = np.arange(1995, 2022, step=1)
