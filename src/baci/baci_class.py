@@ -2,6 +2,7 @@ import pandas as pd
 import os
 import sys 
 import numpy as np
+from functools import reduce
 os.chdir(r'C:\Users\jpark\VSCode\trade_warning\\')
 
 from combine_country_regions import country_mappings
@@ -19,12 +20,12 @@ pd.set_option('display.max_columns',10)
 pd.options.display.max_rows = 50
 
 class baci:
-    def readindata(self, bacidata, tmp_save = True) -> pd.DataFrame:
+    def readindata(self, bacidata, verbose = False, tmp_save = True) -> pd.DataFrame:
         df1 = pd.read_csv(bacidata, usecols=['t','i','j','k','v','q'], 
                           dtype= {'t': 'int64',
                                   'i': 'int64', 
                                   'j': 'int64', 
-                                  'k': 'int64',
+                                  'k': 'object',
                                   'v': 'float64',
                                   'q': 'object'}
                           )
@@ -33,6 +34,9 @@ class baci:
         df1['q'] = df1['q'].apply(lambda x: x.strip())
         df1['q'].replace('NA', np.NaN, inplace=True)
         df1['q'] = df1['q'].astype(float)
+
+        #dimensions
+        #print("shape", df1.shape)
 
         # rename columns to make them meaningful
         df1.rename(columns={'t': 'Year', 'i': 'Exporter', 'j': 'Importer', 'k': 'Product', 'v': 'Value', 'q': 'Quantity'}, inplace=True)
@@ -48,10 +52,24 @@ class baci:
         df1.drop(columns=['country_code', 'Importer'], inplace = True)
         df1.rename(columns={"country_iso3": "Importer"}, inplace=True)
 
+        if verbose:
+            hcodes = [str(x)[0:2] for x in df1["Product"]]
+            print(set(hcodes))
+            print(len(set(hcodes)))
+
         return df1
-
+    
+    def addprodcode(self, data):
+        # add product_codes
+        prodcodes = pd.read_csv(r"src\baci\data\product_codes_HS92_V202401.csv", usecols=['code', 'description'])
+        mask = prodcodes['code'] == '9999AA'
+        prodcodes = prodcodes[~mask]
+        #prodcodes['code'] = prodcodes['code'].astype('int64')
+        data = data.merge(prodcodes, left_on = "Product", right_on = "code", how = "left")
+        
+        return data
+       
     def subsetData(self, data_param: pd.DataFrame(), iso3_param: list[str], imp_exp_param: str, products_param: list[str], minvalue_param=0.0) -> pd.DataFrame():
-
         df1 = data_param.copy()
         if products_param:
             out1 = df1[(df1[imp_exp_param].isin(iso3_param)) & (df1["Product"].isin(products_param))]
@@ -70,6 +88,24 @@ class baci:
         df1 = data.copy()
         df2 = df1[df1['Product'].isin(strategicProducts)]
         return df2
+    
+    def addregion(self, data, exim):
+        if exim == "Exporter":
+            iso_regions = pd.read_csv(r"src\baci\data\iso_countries_regions.csv")
+            iso_regions = iso_regions[['alpha-3', 'region']]
+            data = data.merge(iso_regions, left_on="Exporter", right_on="alpha-3", how="left")
+            data.rename(columns = {'region': 'Exporter_Region'}, inplace = True)
+            data.drop(columns=["alpha-3"], inplace=True)
+        elif exim == "Importer":
+            iso_regions = pd.read_csv(r"src\baci\data\iso_countries_regions.csv")
+            iso_regions = iso_regions[['alpha-3', 'region']]
+            data = data.merge(iso_regions, left_on="Importer", right_on="alpha-3", how="left")
+            data.rename(columns = {'region': 'Importer_Region'}, inplace = True)
+            data.drop(columns=["alpha-3"], inplace=True)
+        else: 
+            print("Error")
+
+        return data
 
     def addshortdescriptoProdname(self, data):
         localdata = data.copy()
@@ -85,7 +121,19 @@ class baci:
         proddesc.rename(columns = {"product": "code"}, inplace = True)
 
         return proddesc
+    
+    def addlongdescription(self, data):
+        localdata = data.copy()
+        longdesc = pd.read_csv(r"src\baci\data\product_codes_HS92_V202401.csv", dtype = str)
+        longdesc.rename(columns = {"code": "isocode"}, inplace=True)
+        longproddesc = localdata.merge(longdesc, left_on="Product", right_on="isocode", how = 'left', suffixes = ['x', 'y'])
+       
+        r1 = localdata.shape[0]
+        r2 = longproddesc.shape[0]
+        assert r1 == r2
 
+        return longproddesc
+        
     def valueacrossallcountries(self, data_param: pd.DataFrame()):
         ### Relative size of Step1 inputs per product
         g = data_param[['Product', 'Value']].groupby(['Product']).sum()
@@ -103,7 +151,6 @@ class baci:
         valueofStep1perExporter['Percentage'] = 100 * (valueofStep1perExporter / valueofStep1perExporter['Value'].sum())
 
         print(valueofStep1perExporter)
-
         return valueofStep1perExporter
 
     def valueperprod(self, data_param, imp_exp_param):
@@ -137,20 +184,163 @@ class baci:
 
         return out
 
-# ININTIALIZE object
-bc1 = baci()
-
 def GDPData():
     data = pd.read_csv(r"src\\baci\\data\\GDP_CurrentUSDollars.csv", index_col=[0])
     return data
-gdp1 = GDPData()
+GDP = GDPData()
 
 def getStrategicGoods():
-    data = pd.read_csv(r"src\\pdf_extractor\\strategicProducts.csv", index_col=[0])
+    data = pd.read_csv(r"src\\pdf_extractor\\strategicProducts.csv", index_col=[0],
+        dtype= {'0': 'object'}
+        )
     data = data.iloc[:,0].tolist()
     return data
-
 STRATEGOODS = getStrategicGoods()
+
+# ININTIALIZE object
+bc1 = baci()
+
+def strategicgoodExportingImportingregions(impexp: str):
+    bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y2022_V202401.csv"
+    data = bc1.readindata(bacidata, tmp_save=False)
+    data = bc1.subsetStrategicGoods(data, STRATEGOODS)
+
+    if impexp == 'Importer':
+        data = bc1.addregion(data, exim='Importer')
+        regionValue = data[['Value', 'Importer_Region']].groupby('Importer_Region').sum()
+        print("Major importing regions: ", regionValue.sort_values(['Value'], ascending = False))
+
+        stateValue = data[['Value', 'Importer']].groupby('Importer').sum()
+        print("Major importing states: ", stateValue.sort_values(['Value'], ascending = False))
+    
+    if impexp == 'Exporter':
+        data = bc1.addregion(data, exim='Exporter')
+        regionValue = data[['Value', 'Exporter_Region']].groupby('Exporter_Region').sum()
+        print("Major exporting regions: ", regionValue.sort_values(['Value'], ascending = False))
+
+        stateValue = data[['Value', 'Exporter']].groupby('Exporter').sum()
+        print("Major exporting states: ", stateValue.sort_values(['Value'], ascending = False))
+
+# strategicgoodExportingImportingregions(impexp = "Exporter")
+# strategicgoodExportingImportingregions(impexp = "Importer")
+
+def typesofstrategicgoods():
+    bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y2022_V202401.csv"
+    data = bc1.readindata(bacidata, verbose = True, tmp_save = False)
+    data = bc1.subsetStrategicGoods(data, STRATEGOODS)
+    data = bc1.addshortdescriptoProdname(data)
+    valuestrategicgood = data[['Value', 'code']].groupby("code").sum()
+    strategicproducts = valuestrategicgood.sort_values(['Value'], ascending = False)
+    
+
+    HS6codestrategic = set([str(x)[0:2] for x in data["Product"]])
+    print(HS6codestrategic)
+    
+    return strategicproducts
+
+# strategicproducts = typesofstrategicgoods()
+# ax = strategicproducts[['Value']].plot.barh(stacked=False,  rot=0, cmap='tab20', figsize=(10, 7))
+# ax.legend(bbox_to_anchor=(1.01, 1.02), loc='upper left')
+# plt.tight_layout()
+# ax.set_title("Value of trade strategic goods by HS6 2-digit category)")
+# plt.show()
+
+def pearlsprecioussemi():
+    bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y2022_V202401.csv"
+    data = bc1.readindata(bacidata, verbose = True, tmp_save = False)
+    data = bc1.subsetStrategicGoods(data, STRATEGOODS)
+    data = bc1.addshortdescriptoProdname(data)
+    data = bc1.addlongdescription(data)
+    print(data.head)
+
+    allprecious = data[data['code'] == "pearls, precious, semi-precious"]
+    allprecious.to_csv("tmp.csv")
+    # remove gold or silver from isocode
+    selectthese = [x for x in allprecious['description'] if "gold" in x or "silver" in x or "diamonds" in x or "Gold" in x or "Silver" in x or "Diamonds" in x or "platinum" in x or "Platinum" in x]
+    goldsilver = allprecious[allprecious['description'].isin(selectthese)]
+
+    print(goldsilver)
+    allprecious = data['Value'][data['code'] == "pearls, precious, semi-precious"].sum()
+    allgoldsilver = goldsilver['Value'].sum()
+    print((allgoldsilver/allprecious)*100)
+
+
+# pearlsprecioussemi()
+
+
+def pearlsprecioussemi_thoughtime():
+    yearsData = np.arange(1995, 2023, step=1)
+    yearly = []
+    for i in yearsData:
+        print(i)
+        bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y" + str(i) + "_V202401.csv"
+
+        data = bc1.readindata(bacidata, verbose = True, tmp_save = False)
+        data = bc1.subsetStrategicGoods(data, STRATEGOODS)
+        data = bc1.addshortdescriptoProdname(data)
+        
+        allprecious = data[data['code'] == "pearls, precious, semi-precious"]
+        perstate = allprecious[['Value', 'Importer']].groupby(['Importer']).sum()
+        perstate.rename(columns = {"Value": str(i)}, inplace = True)
+        yearly.append(perstate)
+
+    return yearly
+
+# yearsprec = pearlsprecioussemi_thoughtime()
+# out1 = reduce(lambda left, right: pd.merge(left, right, left_index=True,right_index=True, how='outer'), yearsprec)
+# print(out1)
+# out1.to_csv("preciousmetals.csv")
+
+prcmet = pd.read_csv("preciousmetals.csv", index_col=[0])
+
+# prcmet.sort_values(by = ['2022'], inplace=True,  ascending = False)
+# print(prcmet)
+# prcmet_subset = prcmet.iloc[0:14,:]
+# prcmet_subset.T.plot(title = "Imports of strategic precious metals")
+# plt.show()
+
+# changes (diff)
+
+prcmet.dropna(inplace=True)
+prcmet = prcmet.T
+prcmet =(prcmet-prcmet.mean())/prcmet.std()
+print(prcmet)
+
+volt = prcmet.abs().sum()
+topten = volt.sort_values(ascending=False)
+print(topten)
+top20_countris = topten.index.to_list()[0:9]
+
+standr = prcmet[top20_countris]
+print(standr)
+standr.plot(title = "Standardized data, top volatility through time")
+plt.show()
+
+
+
+
+def netimports():
+    bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y2022_V202401.csv"
+    data = bc1.readindata(bacidata, tmp_save=False)
+    
+    # select country
+    state = 'NLD'
+    imprts = data[data['Importer'] == 'NLD']
+    imprts = imprts[['Value', 'Product']]
+    gimports = imprts.groupby("Product").sum()
+
+    exprts = data[data['Exporter'] == 'NLD']
+    exprts = exprts[['Value', 'Product']]
+    gexports = exprts.groupby("Product").sum()
+
+    m1 = gimports.merge(gexports, left_on='Product', right_on ='Product', how='outer', suffixes = ('imports', 'exports'))
+    m1['NetImports'] = m1['Valueimports'] - m1['Valueexports']
+   
+    m1.to_csv('tmp.csv')
+    return m1
+
+#m1 = netimports()
+
 
 def allWorldImports():
     yearsData = np.arange(1995, 2023, step=1)
@@ -184,7 +374,7 @@ def allWorldImports():
 
 # data = allWorldImports()
 # print(data.head())
-# data = data.merge(gdp1, left_index=True, right_index=True)
+# data = data.merge(GDP, left_index=True, right_index=True)
 # data['Percentage_Trade'] = ((data['trade_world_value'] * 2)/data['World']) * 100
 # data['Percentage_Trade'].plot(title="World")
 # data.to_csv("World.csv")
@@ -238,37 +428,177 @@ def relativeIncreasePerCountry():
 # relativeCountry = pd.concat(relativeCountry)
 # relativeCountry.to_csv("relativeCountry.csv")
 
-df1 = pd.read_csv("xxxx.csv")
-# print(df1)
+#df1 = pd.read_csv("relativeCountry.csv")
+#print(df1)
 
-# g1 = df1[['state', 'state_value', 'strategic_state_value']].groupby(['state']).mean()
-# g1['state_nonstrategic'] = g1['state_value'] - g1['strategic_state_value']
-# g1.sort_values(['state_value'], inplace=True)
-# print(g1)
 
-# g1 = g1.iloc[-24:,:]
-# ax = g1[['strategic_state_value', 'state_nonstrategic']].plot.bar(stacked=True, rot=0, cmap='tab20', figsize=(10, 7))
-# ax.legend(bbox_to_anchor=(1.01, 1.02), loc='upper left')
-# plt.tight_layout()
-# ax.set_title("Value of Imports (Strategic vs Non-Strategic)")
+############
+# compare to world average percentages
+############
+
+##################################################################
+# percent through time compared to world percent (we have df1 with percentages per country)
+
+# world averages through time
+
+def wrldstate():
+
+    wrldavg = df1[['Year', 'state_value', 'strategic_state_value']].groupby(['Year']).sum()
+    wrldavg['percent'] = (wrldavg['strategic_state_value']/wrldavg['state_value'])*100
+    wrldavg = wrldavg[['percent']]
+    wrldavg.columns = ['World_Avg']
+
+
+    df2 = df1[['Year', 'state', 'percent']]
+    df2.set_index('Year', inplace=True)
+    print(df2)
+    states1 = df2['state']
+    allstates = []
+    for i in states1.unique():
+        print(i)
+        df3 = df2[df2['state'] == i]
+        df3.drop(columns = ['state'], inplace = True)
+        df3.columns = [i]
+        allstates.append(df3)
+
+    percent_allstates = reduce(lambda left, right: pd.merge(left, right, left_index=True,right_index=True, how='outer'), allstates)
+    print(percent_allstates)
+
+    allstatesWorld = wrldavg.merge(percent_allstates, left_index=True, right_index=True)
+    allstatesWorld = allstatesWorld[['World_Avg', 'CHE', 'IND', 'BWA', 'ARE', 'ISR', 'KHM', 'CHN', 'TUR', 'MOZ', 'MKD', 'ZMB']]
+    allstatesWorld.to_csv('percent_allstates.csv')
+
+    return allstatesWorld
+
+# allstatesWorld1 = wrldstate()
+# allstatesWorld1.plot(title = "Highest perentage across time")
 # plt.show()
+
+
+############
+# trade in levels
+############
+
+def tradelevels():
+    g1 = df1[['state', 'state_value', 'strategic_state_value']].groupby(['state']).mean()
+
+    ####################
+    g1 = g1[g1['state_value'] >= 1e6]
+    ####################
+
+    g1['state_nonstrategic'] = g1['state_value'] - g1['strategic_state_value']
+    g1['strategic_percentage'] = (g1['strategic_state_value']/g1['state_value']) * 100
+    print("strategic percent: ", g1['strategic_percentage'].mean())
+    print("strategic_percentage: ", g1.sort_values(['strategic_percentage']))
+    print("strategic percent min max: ", g1['strategic_percentage'].min(), g1['strategic_percentage'].max())
+    g1.sort_values(['state_value'], inplace=True)
+    print(g1)
+
+    g1 = g1.iloc[-24:,:]
+    ax = g1[['strategic_state_value', 'state_nonstrategic']].plot.bar(stacked=True, rot=0, cmap='tab20', figsize=(10, 7))
+    ax.legend(bbox_to_anchor=(1.01, 1.02), loc='upper left')
+    plt.tight_layout()
+    ax.set_title("Value of Imports (Strategic vs Non-Strategic)")
+    plt.show()
+
+#tradelevels()
+
+def getpercountryimports(state):
+    #############
+    # What is happening with Swiz imports?
+    #############
+    bc1 = baci()    
+    bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y2022_V202401.csv"
+    df1 = bc1.readindata(bacidata, tmp_save=False)
+
+    imports = df1[df1['Importer'] == state]
+    imports = bc1.addprodcode(imports)
+    print(imports)
+
+    imports = imports[['Product', 'Value', 'description']].groupby(['Product']).sum()
+    print(imports)
+    swissimp = imports.sort_values(['Value'])
+    swisstopten = swissimp.iloc[-9:,:]
+    print(swisstopten)
+
+    #strategic codes
+    STRATEGOODS = getStrategicGoods()
+
+    print(set(swisstopten.index).intersection(set(STRATEGOODS)))
+
+# getpercountryimports('ISR')
+
+def chinaimportofstrategicgoodthroughtime():
+
+    df1 = pd.read_csv("xxxx.csv", index_col=[0])
+    df1['Year1'] = df1.index
+
+    print(df1)
+    print(df1[['Year1', 'percent']].groupby(['Year1']).mean())
+
+    # china = df1[df1['state'] == "NAM"]
+    # print(china)
+    # china[['percent']].plot()
+    # plt.show()
+
 
 #############
 # percentage
 #############
-g2 = df1[['state', 'state_value', 'strategic_state_value']].groupby(['state']).mean()
-g2['percentage_strategic'] = g2['strategic_state_value']/g2['state_value']
-g2['percentage_non_strategic'] = (g2['state_value'] - g2['strategic_state_value'])/g2['state_value']
-g2.sort_values(['percentage_strategic'], inplace=True)
-print(g2)
+def tradepercent():
+    g2 = df1[['state', 'state_value', 'strategic_state_value']].groupby(['state']).mean()
+    g2['percentage_strategic'] = g2['strategic_state_value']/g2['state_value']
+    g2['percentage_non_strategic'] = (g2['state_value'] - g2['strategic_state_value'])/g2['state_value']
+    g2.sort_values(['percentage_strategic'], inplace=True)
+    print(g2)
 
-g2 = g2[g2['state_value'] >= 1e6]
-g2 = g2.iloc[-24:,:]
-ax = g2[['percentage_strategic', 'percentage_non_strategic']].plot.bar(stacked=True, rot=0, cmap='tab20', figsize=(10, 7))
-ax.legend(bbox_to_anchor=(1.01, 1.02), loc='upper left')
-plt.tight_layout()
-ax.set_title("Percentage of Strategic Imports (Strategic vs Non-Strategic), trade value >= 1e6")
-plt.show()
+    ###################
+    g2 = g2[g2['state_value'] >= 1e6]
+    g2 = g2.iloc[-24:,:]
+    ax = g2[['percentage_strategic', 'percentage_non_strategic']].plot.bar(stacked=True, rot=0, cmap='tab20', figsize=(10, 7))
+    ax.legend(bbox_to_anchor=(1.01, 1.02), loc='upper left')
+    plt.tight_layout()
+    ax.set_title("Percentage of Strategic Imports (Strategic vs Non-Strategic), trade value >= 1e6")
+
+    #plt.show()
+
+    highestpercent_importers = g2.index.tolist()[0:24]
+    return highestpercent_importers
+
+# highestpercent_importers =  tradepercent()
+# print(highestpercent_importers)
+
+#############
+#closerlookattop25
+#############
+
+############################################################
+
+def closerlookattop25():
+    yearsData = np.arange(1995, 2023, step=1)
+    allyears = []
+    for j in yearsData:
+        print(j)
+        bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y" + str(j) + "_V202401.csv"
+        data = bc1.readindata(bacidata, verbose = False, tmp_save = False)
+        data = bc1.subsetStrategicGoods(data, STRATEGOODS)
+        data = bc1.addshortdescriptoProdname(data)
+
+        for i in highestpercent_importers:
+            dt1 = data[data['Importer'] == i]
+            if dt1.empty:
+                allyears.append([j, i, np.NaN])
+            else: 
+                dt2 = dt1[['Value', 'code']].groupby(['code']).sum()
+                topProd = dt2.sort_values(['Value'], ascending = False)
+                allyears.append([j, i, topProd.index.tolist()[0]])
+
+    return pd.DataFrame(allyears)
+
+# top25 = closerlookattop25()
+# top25.columns = ['Year', 'State', 'H66']
+# top25.sort_values(['State', 'Year'], ascending=[True, True], inplace = True)
+# top25.to_csv("top25.csv")
 
 
 def allDutchImports():
@@ -301,7 +631,7 @@ def allDutchImports():
 
 # data = allDutchImports()
 # print(data.head())
-# data = data.merge(gdp1, left_index=True, right_index=True)
+# data = data.merge(GDP, left_index=True, right_index=True)
 # data['Percentage_Trade'] = ((data['Exp_Value'] + data['Imp_Value'])/data['Netherlands']) * 100
 # data['Percentage_Trade'].plot(title="Nederland")
 # data.to_csv("Netherlands.csv")
@@ -462,16 +792,6 @@ def allDutchGreenTransitionOneYear(year):
 #def allOECDGreenTransistion
     
 
-
-
-
-#######################
-# add regions
-# iso_regions = pd.read_csv(r"data\iso_countries_regions.csv")
-# iso_regions = iso_regions[['alpha-3', 'region']]
-# data = data.merge(iso_regions, left_on="largestExporter", right_on="alpha-3", how="left")
-# data.drop(columns=["alpha-3"], inplace=True)
-########################
     
 
 ########################
