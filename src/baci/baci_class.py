@@ -240,10 +240,10 @@ def typesofstrategicgoods():
 
 # strategicproducts = typesofstrategicgoods()
 # ax = strategicproducts[['Value']].plot.barh(stacked=False,  rot=0, cmap='tab20', figsize=(10, 7))
-# ax.legend(bbox_to_anchor=(1.01, 1.02), loc='upper left')
+# #ax.legend('best')
 # plt.tight_layout()
 # ax.set_title("Value of trade strategic goods by HS6 2-digit category)")
-# plt.show()
+# plt.savefig("output\ValueoftradestrategicgoodHS6",bbox_inches='tight')
 
 def pearlsprecioussemi():
     bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y2022_V202401.csv"
@@ -311,11 +311,10 @@ topten = volt.sort_values(ascending=False)
 print(topten)
 top20_countris = topten.index.to_list()[0:9]
 
-standr = prcmet[top20_countris]
-print(standr)
-standr.plot(title = "Standardized data, top volatility through time")
-plt.show()
-
+# standr = prcmet[top20_countris]
+# print(standr)
+# standr.plot(title = "Standardized data, top volatility through time")
+# plt.savefig("output\Standardizeddatatopvolatility", bbox_inches='tight')
 
 
 
@@ -401,36 +400,43 @@ def relativeIncreasePerCountry():
         allstates = []
         for j in countries_import:
             st = df1[df1['Importer'] == j]
-        
-            # doesn't make sense/impossible to distinguish between imports and exports
             st_value = st['Value'].sum()
             st_quantity = st['Quantity'].sum()
             year  = st['Year'].tolist()[0]
 
+            #############
             # subset on strategic goods
+            #############
+            
             st_strat = bc1.subsetStrategicGoods(st, STRATEGOODS)
+            st_strat = bc1.addshortdescriptoProdname(st_strat)
+    
 
             # doesn't make sense/impossible to distinguish between imports and exports
             st_strategic_value = st_strat['Value'].sum()
             st_strategic_quantity = st_strat['Quantity'].sum()
-        
-            allstates.append([year, j, st_value, st_quantity, st_strategic_value, st_strategic_quantity])     
+
+            #############
+            # subset on precious
+            #############
+            allprecious = st_strat[st_strat['code'] == "pearls, precious, semi-precious"]
+            st_strategic_value_precious = allprecious['Value'].sum()
+            st_strategic_quantity_precious = allprecious['Quantity'].sum()
+
+
+            allstates.append([year, j, st_value, st_quantity, st_strategic_value, st_strategic_quantity, st_strategic_value_precious, st_strategic_quantity_precious])     
                 
         data = pd.DataFrame(allstates)
-        data.columns = ['Year', 'state', 'state_value', 'state_quantity', 'strategic_state_value', 'strategic_state_quantity']
+        data.columns = ['Year', 'state', 'state_value', 'state_quantity', 'strategic_state_value', 'strategic_state_quantity', 'st_strategic_value_precious', 'st_strategic_quantity_precious']
         data.set_index('Year', inplace=True)
     
         allyears.append(data)
     
     return allyears
 
-# relativeCountry = relativeIncreasePerCountry()
-# relativeCountry = pd.concat(relativeCountry)
-# relativeCountry.to_csv("relativeCountry.csv")
-
-#df1 = pd.read_csv("relativeCountry.csv")
-#print(df1)
-
+relativeCountry = relativeIncreasePerCountry()
+relativeCountry = pd.concat(relativeCountry)
+relativeCountry.to_csv("relativeCountry.csv")
 
 ############
 # compare to world average percentages
@@ -438,10 +444,26 @@ def relativeIncreasePerCountry():
 
 ##################################################################
 # percent through time compared to world percent (we have df1 with percentages per country)
+##################################################################
 
 # world averages through time
 
-def wrldstate():
+def addprecentages(data):
+    allstates = data['state'].unique()
+    allstatevalues = []
+    for i in allstates:
+        dt1 = data[data['state'] == i]
+        dt1.sort_values(['Year'], ascending=False, inplace = True)
+        dt1['percent'] = (dt1['strategic_state_value']/dt1['state_value'])* 100
+        allstatevalues.append(dt1)
+    return allstatevalues
+
+data = pd.read_csv("relativeCountry.csv")
+print(data)
+newdf1 = addprecentages(data)
+newdf1 = pd.concat(newdf1)
+
+def wrldstate(df1):
 
     wrldavg = df1[['Year', 'state_value', 'strategic_state_value']].groupby(['Year']).sum()
     wrldavg['percent'] = (wrldavg['strategic_state_value']/wrldavg['state_value'])*100
@@ -470,20 +492,22 @@ def wrldstate():
 
     return allstatesWorld
 
-# allstatesWorld1 = wrldstate()
-# allstatesWorld1.plot(title = "Highest perentage across time")
-# plt.show()
+
+allstatesWorld1 = wrldstate(newdf1)
+allstatesWorld1.plot(title = "Highest percentage across time")
+plt.show()
+plt.savefig("output\Highestpercentageacrosstime")
 
 
 ############
 # trade in levels
 ############
 
-def tradelevels():
-    g1 = df1[['state', 'state_value', 'strategic_state_value']].groupby(['state']).mean()
+def tradelevels(data):
+    g1 = data[['state', 'state_value', 'strategic_state_value']].groupby(['state']).mean()
 
     ####################
-    g1 = g1[g1['state_value'] >= 1e6]
+    g1 = g1[g1['state_value'] >= 0]
     ####################
 
     g1['state_nonstrategic'] = g1['state_value'] - g1['strategic_state_value']
@@ -496,12 +520,15 @@ def tradelevels():
 
     g1 = g1.iloc[-24:,:]
     ax = g1[['strategic_state_value', 'state_nonstrategic']].plot.bar(stacked=True, rot=0, cmap='tab20', figsize=(10, 7))
-    ax.legend(bbox_to_anchor=(1.01, 1.02), loc='upper left')
+    ax.legend(loc='best')
     plt.tight_layout()
     ax.set_title("Value of Imports (Strategic vs Non-Strategic)")
-    plt.show()
+    plt.savefig(r"output\ValueofImportsStrategicNonStrategic",bbox_inches='tight')
 
-#tradelevels()
+
+# data = pd.read_csv("relativeCountry.csv")
+# print(data)
+# tradelevels(data)
 
 def getpercountryimports(state):
     #############
@@ -541,12 +568,14 @@ def chinaimportofstrategicgoodthroughtime():
     # china[['percent']].plot()
     # plt.show()
 
+# chinaimportofstrategicgoodthroughtime()
+
 
 #############
 # percentage
 #############
-def tradepercent():
-    g2 = df1[['state', 'state_value', 'strategic_state_value']].groupby(['state']).mean()
+def tradepercent(data):
+    g2 = data[['state', 'state_value', 'strategic_state_value']].groupby(['state']).mean()
     g2['percentage_strategic'] = g2['strategic_state_value']/g2['state_value']
     g2['percentage_non_strategic'] = (g2['state_value'] - g2['strategic_state_value'])/g2['state_value']
     g2.sort_values(['percentage_strategic'], inplace=True)
@@ -556,16 +585,16 @@ def tradepercent():
     g2 = g2[g2['state_value'] >= 1e6]
     g2 = g2.iloc[-24:,:]
     ax = g2[['percentage_strategic', 'percentage_non_strategic']].plot.bar(stacked=True, rot=0, cmap='tab20', figsize=(10, 7))
-    ax.legend(bbox_to_anchor=(1.01, 1.02), loc='upper left')
+    ax.legend(loc='best')
     plt.tight_layout()
     ax.set_title("Percentage of Strategic Imports (Strategic vs Non-Strategic), trade value >= 1e6")
-
-    #plt.show()
+    plt.savefig(r"output\PercentageofStrategic",bbox_inches='tight')
 
     highestpercent_importers = g2.index.tolist()[0:24]
     return highestpercent_importers
 
-# highestpercent_importers =  tradepercent()
+# data = pd.read_csv("relativeCountry.csv")
+# highestpercent_importers =  tradepercent(data)
 # print(highestpercent_importers)
 
 #############
