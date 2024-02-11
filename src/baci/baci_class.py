@@ -3,6 +3,7 @@ import os
 import sys 
 import numpy as np
 from functools import reduce
+import itertools
 os.chdir(r'C:\Users\jpark\VSCode\trade_warning\\')
 
 from combine_country_regions import country_mappings
@@ -208,18 +209,18 @@ def strategicgoodExportingImportingregions(impexp: str):
     if impexp == 'Importer':
         data = bc1.addregion(data, exim='Importer')
         regionValue = data[['Value', 'Importer_Region']].groupby('Importer_Region').sum()
-        print("Major importing regions: ", regionValue.sort_values(['Value'], ascending = False))
+        print("Major strategic importing regions: ", regionValue.sort_values(['Value'], ascending = False))
 
         stateValue = data[['Value', 'Importer']].groupby('Importer').sum()
-        print("Major importing states: ", stateValue.sort_values(['Value'], ascending = False))
+        print("Major stratefic importing states: ", stateValue.sort_values(['Value'], ascending = False))
     
     if impexp == 'Exporter':
         data = bc1.addregion(data, exim='Exporter')
         regionValue = data[['Value', 'Exporter_Region']].groupby('Exporter_Region').sum()
-        print("Major exporting regions: ", regionValue.sort_values(['Value'], ascending = False))
+        print("Major strategic exporting regions: ", regionValue.sort_values(['Value'], ascending = False))
 
         stateValue = data[['Value', 'Exporter']].groupby('Exporter').sum()
-        print("Major exporting states: ", stateValue.sort_values(['Value'], ascending = False))
+        print("Major strategic exporting states: ", stateValue.sort_values(['Value'], ascending = False))
 
 # strategicgoodExportingImportingregions(impexp = "Exporter")
 # strategicgoodExportingImportingregions(impexp = "Importer")
@@ -232,7 +233,6 @@ def typesofstrategicgoods():
     valuestrategicgood = data[['Value', 'code']].groupby("code").sum()
     strategicproducts = valuestrategicgood.sort_values(['Value'], ascending = False)
     
-
     HS6codestrategic = set([str(x)[0:2] for x in data["Product"]])
     print(HS6codestrategic)
     
@@ -240,9 +240,10 @@ def typesofstrategicgoods():
 
 # strategicproducts = typesofstrategicgoods()
 # ax = strategicproducts[['Value']].plot.barh(stacked=False,  rot=0, cmap='tab20', figsize=(10, 7))
-# #ax.legend('best')
+# ax.legend('best')
 # plt.tight_layout()
 # ax.set_title("Value of trade strategic goods by HS6 2-digit category)")
+# plt.show()
 # plt.savefig("output\ValueoftradestrategicgoodHS6",bbox_inches='tight')
 
 def pearlsprecioussemi():
@@ -264,9 +265,7 @@ def pearlsprecioussemi():
     allgoldsilver = goldsilver['Value'].sum()
     print((allgoldsilver/allprecious)*100)
 
-
 # pearlsprecioussemi()
-
 
 def pearlsprecioussemi_thoughtime():
     yearsData = np.arange(1995, 2023, step=1)
@@ -292,33 +291,53 @@ def pearlsprecioussemi_thoughtime():
 # out1.to_csv("preciousmetals.csv")
 
 prcmet = pd.read_csv("preciousmetals.csv", index_col=[0])
-
-# prcmet.sort_values(by = ['2022'], inplace=True,  ascending = False)
-# print(prcmet)
-# prcmet_subset = prcmet.iloc[0:14,:]
-# prcmet_subset.T.plot(title = "Imports of strategic precious metals")
-# plt.show()
-
-# changes (diff)
-
-prcmet.dropna(inplace=True)
-prcmet = prcmet.T
-prcmet =(prcmet-prcmet.mean())/prcmet.std()
 print(prcmet)
 
-volt = prcmet.abs().sum()
-topten = volt.sort_values(ascending=False)
-print(topten)
-top20_countris = topten.index.to_list()[0:9]
+def preciousthroughtime(data):
+    prcmet.sort_values(by = ['2022'], inplace=True,  ascending = False)
+    print(prcmet)
+    prcmet_subset = prcmet.iloc[0:10,:]
+    prcmet_subset.T.plot(title = "Imports of strategic precious metals")
+    plt.savefig("output\Importsofstrategicgoods", bbox_inches='tight')
+    plt.show()
 
-# standr = prcmet[top20_countris]
-# print(standr)
-# standr.plot(title = "Standardized data, top volatility through time")
-# plt.savefig("output\Standardizeddatatopvolatility", bbox_inches='tight')
+    top3throughtime = []
+    for column in prcmet:
+        data = prcmet.nlargest(3, column)
+        data = data.index.tolist()
+        top3throughtime.append(data)
+
+    top3 = list(itertools.chain.from_iterable(top3throughtime))
+    print(set(top3))
+
+preciousthroughtime(prcmet)    
+
+def standardizedrelative(data):
+    prcmet = data.copy()
+    prcmet.dropna(inplace=True)
+    prcmet = prcmet.T
+    
+    means = prcmet.mean()
+    means.to_csv("tmp.csv")
 
 
+    prcmet =(prcmet-prcmet.mean())/prcmet.std()
+    print(prcmet)
 
-def netimports():
+    volt = prcmet.abs().sum()
+    topten = volt.sort_values(ascending=False)
+    print(topten)
+    top20_countries = topten.index.to_list()[0:10]
+
+    standr = prcmet[top20_countries]
+    print(standr)
+    standr.plot(title = "Standardized data, top volatility through time")
+    plt.show()
+    plt.savefig("output\Standardizeddatatopvolatility", bbox_inches='tight')
+
+standardizedrelative(prcmet)
+
+def netimportsCountry():
     bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y2022_V202401.csv"
     data = bc1.readindata(bacidata, tmp_save=False)
     
@@ -338,8 +357,8 @@ def netimports():
     m1.to_csv('tmp.csv')
     return m1
 
-#m1 = netimports()
-
+# n1 = netimportsCountry()
+# print(n1)
 
 def allWorldImports():
     yearsData = np.arange(1995, 2023, step=1)
@@ -371,24 +390,25 @@ def allWorldImports():
 
     return data
 
-# data = allWorldImports()
-# print(data.head())
-# data = data.merge(GDP, left_index=True, right_index=True)
-# data['Percentage_Trade'] = ((data['trade_world_value'] * 2)/data['World']) * 100
-# data['Percentage_Trade'].plot(title="World")
-# data.to_csv("World.csv")
-# plt.show()
+#data = allWorldImports()
+#print(data.head())
+#data = data.merge(GDP, left_index=True, right_index=True)
+#data['Percentage_Trade'] = ((data['trade_world_value'] * 2)/data['World']) * 100
+#data['Percentage_Trade'].plot(title="World")
+#data.to_csv("World.csv")
 
-# world = pd.read_csv("World.csv")
-# print(world)
+def plotofworlddata():
+    world = pd.read_csv("World.csv")
+    print(world)
 
-# world[['trade_world_value', 'trade_world_quantity', 'strategic_world_value', 'strategic_world_quantity']].plot()
-# plt.show()
+    world[['trade_world_value', 'trade_world_quantity', 'strategic_world_value', 'strategic_world_quantity']].plot(title = "World trade and strategic strategic trade in values and quantities")
+    plt.show()
+    plt.savefig("output\worldtradestrategic.png")
 
+#plotofworlddata()
 # are there countries in which trade of strategic goods has grown relative to their trade
-
-
 def relativeIncreasePerCountry():
+    print("TAKES TIME, GET COFFEE OR TEA AND PASTRY!")
     yearsData = np.arange(1995, 2023, step=1)
     allyears = []
     for i in yearsData:
@@ -411,7 +431,6 @@ def relativeIncreasePerCountry():
             st_strat = bc1.subsetStrategicGoods(st, STRATEGOODS)
             st_strat = bc1.addshortdescriptoProdname(st_strat)
     
-
             # doesn't make sense/impossible to distinguish between imports and exports
             st_strategic_value = st_strat['Value'].sum()
             st_strategic_quantity = st_strat['Quantity'].sum()
@@ -423,7 +442,6 @@ def relativeIncreasePerCountry():
             st_strategic_value_precious = allprecious['Value'].sum()
             st_strategic_quantity_precious = allprecious['Quantity'].sum()
 
-
             allstates.append([year, j, st_value, st_quantity, st_strategic_value, st_strategic_quantity, st_strategic_value_precious, st_strategic_quantity_precious])     
                 
         data = pd.DataFrame(allstates)
@@ -434,9 +452,9 @@ def relativeIncreasePerCountry():
     
     return allyears
 
-relativeCountry = relativeIncreasePerCountry()
-relativeCountry = pd.concat(relativeCountry)
-relativeCountry.to_csv("relativeCountry.csv")
+# relativeCountry = relativeIncreasePerCountry()
+# relativeCountry = pd.concat(relativeCountry)
+# relativeCountry.to_csv("relativeCountry.csv")
 
 ############
 # compare to world average percentages
@@ -453,25 +471,30 @@ def addprecentages(data):
     allstatevalues = []
     for i in allstates:
         dt1 = data[data['state'] == i]
-        dt1.sort_values(['Year'], ascending=False, inplace = True)
-        dt1['percent'] = (dt1['strategic_state_value']/dt1['state_value'])* 100
-        allstatevalues.append(dt1)
+        # all years should be present    
+        allyears = dt1['Year'].tolist()
+        if len(allyears) >= 28:
+            dt1.sort_values(['Year'], ascending=False, inplace = True)
+            dt1['percent_strategic'] = (dt1['strategic_state_value']/dt1['state_value'])* 100
+            dt1['percent_strategic_precious'] = (dt1['st_strategic_value_precious']/dt1['state_value'])* 100
+            allstatevalues.append(dt1)
     return allstatevalues
 
-data = pd.read_csv("relativeCountry.csv")
-print(data)
-newdf1 = addprecentages(data)
-newdf1 = pd.concat(newdf1)
+# data = pd.read_csv("relativeCountry.csv")
+# print(data)
+# newdf1 = addprecentages(data)
+# newdf1 = pd.concat(newdf1)
+# print(newdf1)
+# newdf1.to_csv("allstatesprecious.csv")
 
 def wrldstate(df1):
 
-    wrldavg = df1[['Year', 'state_value', 'strategic_state_value']].groupby(['Year']).sum()
-    wrldavg['percent'] = (wrldavg['strategic_state_value']/wrldavg['state_value'])*100
+    wrldavg = df1[['Year', 'state_value', 'st_strategic_value_precious']].groupby(['Year']).sum()
+    wrldavg['percent'] = (wrldavg['st_strategic_value_precious']/wrldavg['state_value'])*100
     wrldavg = wrldavg[['percent']]
     wrldavg.columns = ['World_Avg']
 
-
-    df2 = df1[['Year', 'state', 'percent']]
+    df2 = df1[['Year', 'state', 'percent_strategic_precious']]
     df2.set_index('Year', inplace=True)
     print(df2)
     states1 = df2['state']
@@ -486,17 +509,23 @@ def wrldstate(df1):
     percent_allstates = reduce(lambda left, right: pd.merge(left, right, left_index=True,right_index=True, how='outer'), allstates)
     print(percent_allstates)
 
+    percent1_mean = percent_allstates.mean()
+    topten = percent1_mean.sort_values(ascending=False)
+    topten = topten.index.to_list()[0:10]
+
     allstatesWorld = wrldavg.merge(percent_allstates, left_index=True, right_index=True)
-    allstatesWorld = allstatesWorld[['World_Avg', 'CHE', 'IND', 'BWA', 'ARE', 'ISR', 'KHM', 'CHN', 'TUR', 'MOZ', 'MKD', 'ZMB']]
+    columns = ['World_Avg'] + topten
+    allstatesWorld = allstatesWorld[columns]
     allstatesWorld.to_csv('percent_allstates.csv')
+
+    allstatesWorld.plot(title = "Highest percentage of precious metals across time")
+    plt.show()
+    #plt.savefig("output\Highestpercentageacrosstime")
 
     return allstatesWorld
 
 
-allstatesWorld1 = wrldstate(newdf1)
-allstatesWorld1.plot(title = "Highest percentage across time")
-plt.show()
-plt.savefig("output\Highestpercentageacrosstime")
+#allstatesWorld1 = wrldstate(newdf1)
 
 
 ############
@@ -629,23 +658,22 @@ def closerlookattop25():
 # top25.sort_values(['State', 'Year'], ascending=[True, True], inplace = True)
 # top25.to_csv("top25.csv")
 
-
-def allDutchImports():
+def strategicImports(country):
     yearsData = np.arange(1995, 2022, step=1)
     yearly = []
     for i in yearsData:
         print(i)
-        bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_V202401\BACI_HS92_Y" + str(i) + "_V202401.csv"
+        bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y" + str(i) + "_V202401.csv"
         df1 = bc1.readindata(bacidata, tmp_save=True)
         
         # subset on strategic goods
         df1 = bc1.subsetStrategicGoods(df1, STRATEGOODS)
 
-        df_imp = bc1.subsetData(df1, ["NLD"], 'Importer', [])
+        df_imp = bc1.subsetData(df1, [country], 'Importer', [])
         imp_quant = df_imp['Quantity'].sum()
         imp_value = df_imp['Value'].sum()
         
-        df_exp = bc1.subsetData(df1, ["NLD"], 'Exporter', [])
+        df_exp = bc1.subsetData(df1, [country], 'Exporter', [])
         exp_quant = df_exp['Quantity'].sum()
         exp_value = df_exp['Value'].sum()
         
@@ -658,8 +686,11 @@ def allDutchImports():
 
     return data
 
-# data = allDutchImports()
+# data = strategicImports("PRK")
 # print(data.head())
+
+
+
 # data = data.merge(GDP, left_index=True, right_index=True)
 # data['Percentage_Trade'] = ((data['Exp_Value'] + data['Imp_Value'])/data['Netherlands']) * 100
 # data['Percentage_Trade'].plot(title="Nederland")
