@@ -10,6 +10,9 @@ from combine_country_regions import country_mappings
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
 
+import statsmodels.api as sm
+from statsmodels.formula.api import ols
+
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -347,7 +350,6 @@ def compareDutchimportperregion(data):
 # first, get top trader importers in terms of total trade
 # Or, just look at the trade of strategic goods as a proportion of total imports or gdp   
 
-
 # for netherlads, group by subcategories, see though time
 def dutchbreakdown():
     yearsData = np.arange(1995, 2023, step=1)
@@ -375,33 +377,33 @@ def dutchbreakdown():
 # np.log(dutchbycode).plot()
 # plt.show()
 
-plotable = pd.read_csv("dutchbycode.csv", index_col=[0])
-plotable['AverageAllProducts']  = plotable.mean(axis=1)
-print(plotable)
+def plotdutchbycode():
 
-n = plotable.shape[1]
-color = iter(cm.twilight_shifted(np.linspace(0, 1, n)))
-for i in range(n):
-    c = next(color)
-    namecolumn = plotable.columns[i]
-    if namecolumn == 'AverageAllProducts':
-            c = "black"
-            lw = 2.0
-            ls = '--'
-    else:
-            lw = 1.5
-            ls ='-'
+    plotable = pd.read_csv("dutchbycode.csv", index_col=[0])
+    plotable['AverageAllProducts']  = plotable.mean(axis=1)
+    print(plotable)
 
-    x = plotable.index.to_list()
-    y = np.log(plotable.iloc[:, i])
-    plt.plot(x,y,c=c, linewidth = lw, linestyle = ls, label = namecolumn)
-    plt.text(2022+.5, y.iloc[-1], namecolumn + " " + str(y.iloc[-1])[0:4], fontsize = 6)
+    n = plotable.shape[1]
+    color = iter(cm.twilight_shifted(np.linspace(0, 1, n)))
+    for i in range(n):
+        c = next(color)
+        namecolumn = plotable.columns[i]
+        if namecolumn == 'AverageAllProducts':
+                c = "black"
+                lw = 2.0
+                ls = '--'
+        else:
+                lw = 1.5
+                ls ='-'
 
-plt.legend(loc="upper left")  
-plt.title('Log Value per Product Code per Year')
-plt.show()
+        x = plotable.index.to_list()
+        y = np.log(plotable.iloc[:, i])
+        plt.plot(x,y,c=c, linewidth = lw, linestyle = ls, label = namecolumn)
+        plt.text(2022+.5, y.iloc[-1], namecolumn + " " + str(y.iloc[-1])[0:4], fontsize = 6)
 
-
+    plt.legend(loc="upper left")  
+    plt.title('Log Value per Product Code per Year')
+    plt.show()
 
 def toptraders2022():
     dt1 = bc1.readindata("C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y2022_V202401.csv")
@@ -410,7 +412,7 @@ def toptraders2022():
     dt3 = dt2.sort_values(['Value'], ascending=False)
     
     return dt3.index
-# toptraders = toptraders2022().tolist()
+toptraders = toptraders2022().tolist()
 
 def slowmethodtogetregressiondata():
     yearsData = np.arange(1995, 2023, step=1)
@@ -487,43 +489,44 @@ def regressiondata():
 # regressiondata.sort_values(['Importer', 'Year'], inplace=True)
 # regressiondata.to_csv("regressionData.csv", index = False)
 
-# data = pd.read_csv("regressionData.csv", index_col=[0])
-# data.sort_values(['Importer', 'Year'], inplace=True)
-# data['state'] = data.index
-# data['Yearidx'] = data['Year']
-# data.set_index("Yearidx", inplace=True, drop = True)
+def augmentregressiondata():
+    data = pd.read_csv("regressionData.csv", index_col=[0])
+    data.sort_values(['Importer', 'Year'], inplace=True)
+    data['state'] = data.index
+    data['Yearidx'] = data['Year']
+    data.set_index("Yearidx", inplace=True, drop = True)
 
-# # first percent of total imports
-# meanallcountries = data[['Year', 'percentStratofImports']].groupby("Year").mean()
-# meanallcountries.rename(columns = {'percentStratofImports': 'allstateAverageStrat'}, inplace=True)
+    # first percent of total imports
+    meanallcountries = data[['Year', 'percentStratofImports']].groupby("Year").mean()
+    meanallcountries.rename(columns = {'percentStratofImports': 'allstateAverageStrat'}, inplace=True)
 
-# meanallcountries = data[['Year', 'percentStratofGDP']].groupby("Year").mean()
-# meanallcountries.rename(columns = {'percentStratofGDP': 'percentStratofGDP'}, inplace=True)
+    meanallcountries = data[['Year', 'percentStratofGDP']].groupby("Year").mean()
+    meanallcountries.rename(columns = {'percentStratofGDP': 'percentStratofGDP'}, inplace=True)
 
-# for each state, subtract average
-# recollectalldata = []
-# for st in data['state'].unique():
+    # for each state, subtract average
+    recollectalldata = []
+    for st in data['state'].unique():
 
-#     # averages across all states
-#     meanallcountriesImports = data[['Year', 'percentStratofImports']].groupby("Year").mean().values
-#     meanallcountriesGDP = data[['Year', 'percentStratofGDP']].groupby("Year").mean().values
+        # averages across all states
+        meanallcountriesImports = data[['Year', 'percentStratofImports']].groupby("Year").mean().values
+        meanallcountriesGDP = data[['Year', 'percentStratofGDP']].groupby("Year").mean().values
+            
+        stdata = data[data['state'] == st]
+        if stdata.shape[0] < 28:
+            print("Missing years of data: ", st)
+            continue
         
-#     stdata = data[data['state'] == st]
-#     if stdata.shape[0] < 28:
-#         print("Missing years of data: ", st)
-#         continue
-    
-#     stdata['difffrommeanStratofImports'] = stdata[['percentStratofImports']].values - meanallcountriesImports
-#     stdata['difffrommeanStratofGDP'] = stdata[['percentStratofGDP']].values - meanallcountriesGDP
-#     recollectalldata.append(stdata)
+        stdata['difffrommeanStratofImports'] = stdata[['percentStratofImports']].values - meanallcountriesImports
+        stdata['difffrommeanStratofGDP'] = stdata[['percentStratofGDP']].values - meanallcountriesGDP
+        recollectalldata.append(stdata)
 
-# newdata = pd.concat(recollectalldata)
-# newdata.to_csv("regressionDataAugmented.csv")
+    newdata = pd.concat(recollectalldata)
+    newdata.to_csv("regressionDataAugmented.csv")
 
 # Which countries have had higher than average 
 
-#newdata = pd.read_csv('regressionDataAugmented.csv', index_col=[0])
-#newdata['Year'] = newdata.index
+newdata = pd.read_csv('regressionDataAugmented.csv', index_col=[0])
+newdata['Year'] = newdata.index
 
 def plotdifferences(whichcomparison, whichstates, newdata):
 
@@ -551,7 +554,6 @@ def plotdifferences(whichcomparison, whichstates, newdata):
                 lw = 1.0
                 ls ='-'
 
-
         x = plotable.index.to_list()
         y = np.log(plotable.iloc[:, i])
         plt.plot(x,y,c=c, linewidth = lw, linestyle = ls, label = namecolumn)
@@ -577,7 +579,23 @@ def percentgdptopbottom():
     whichcomparison = 'percentStratofGDP'
     whichstates = statehighestpercentGDP
     plotdifferences(whichcomparison, whichstates, newdata)
-#percentgdptopbottom()
+# percentgdptopbottom()
+
+# get number of rows, assign labels highest, high, average, low, lowest
+
+def addcategorical(data: pd.DataFrame):
+    repeatthese = ['highest', 'second', 'third', 'fourth', 'average', 'sixth', 'seventh', 'eighth', 'nineth', 'lowest']
+    numrows = range(perstateGDP.shape[0])
+    splits = np.array_split(np.array(numrows), len(repeatthese))
+    repeaters = [len(numrows) for numrows in splits]
+    perstateGDP['rankStratperGDP'] = pd.Series(repeatthese).repeat(repeaters).tolist()
+    return perstateGDP
+
+# perstateGDP = newdata[['state', 'percentStratofGDP']].groupby(['state']).sum()
+# b1 = perstateGDP.sort_values(['percentStratofGDP'], ascending=False, inplace=True)
+# b2 = addcategorical(b1)
+# print(b2.groupby('rankStratperGDP').mean())
+
 
 def percenttradetopbottom():
     highestpercentpercentStrat = newdata[['percentStratofImports', 'state']].groupby('state').mean()
@@ -589,11 +607,74 @@ def percenttradetopbottom():
     plotdifferences(whichcomparison, whichstates, newdata)
 #percenttradetopbottom()
 
-def regressiongdp():
-    import statsmodels.api as sm
-    from statsmodels.formula.api import ols
-    model = ols('sumStatGoods ~ GDP', data=nld).fit()
-    nld['resids']  = model.resid
+newdata = pd.read_csv('regressionDataAugmented.csv', index_col=[0])
+newdata['Year'] = newdata.index
+
+# the idea, after having taken into account changes in gdp along with a time trend, how much has the purchase of strategic goods increased.
+# the residuals show us the change in purchases of strategic goods after having removed or reduced the effects of changes in a state's GDP.
+# Negative residuals don't imply that actually spending for strategic goods fell, only that purchases have fallen relative to GDP.  
+# If GDP stays the same or falls, while ...
+
+def regressiongdp(data):
+    allstateresids = []
+    allresidscoef = []
+    for st in data.state.unique():
+        print(st)
+        onestate = data[data['state'] == st]
+        # if a state, eg GIB, is missing data, continue
+        if onestate.dropna().shape[0] < 28:
+            print("Missing data: ", st)
+            continue
+    
+        X = onestate['GDP'].diff()
+        # X
+        X = sm.add_constant(X)
+        X = X.dropna()
+        # y
+        y = onestate['sumStratGoods'].diff()
+        y = y.dropna()
+        
+        model = sm.OLS(y,X).fit()
+        
+        onestate['resids']  = model.resid
+
+        allstateresids.append(onestate[['state', 'Year', 'sumStratGoods', 'GDP', 'resids']])
+        allresidscoef.append(pd.DataFrame({"State": st, "GDP_coef": model.params['GDP'], "tvalue_GDP": model.tvalues['GDP']}, index = [0]))
+
+    return allstateresids, allresidscoef
+
+rg1, coef = regressiongdp(newdata)
+allresids = pd.concat(rg1)
+allcoef = pd.concat(coef)
+print(allresids)
+print(allcoef)
+allcoef.to_csv("allcoef.csv")
+allresids.to_csv("allresids.csv")
+
+allresids = pd.read_csv("allresids.csv", index_col=[0])
+
+# which states have shown positive increases in percent
+print(allresids)
+
+# for st in allresids['state'].unique():
+#     country = allresids[allresids['state'] == st]
+
+#     lastvalue = country.loc[2022, 'resids']
+#     if lastvalue < 0:
+#         print(st)
+#         # calc decrease
+#         lasttwo = country.loc[[2021,2022], "resids"]
+#         print(((lasttwo.iloc[1] - lasttwo.iloc[0])/lasttwo.iloc[0])*100)
+
+
+
+# no significant change
+
+# which countries have recently shown an increase, greatest percentage change
+
+
+
+
 
 def DutchThroughTime():
     yearsData = np.arange(1995, 2023, step=1)
@@ -615,13 +696,9 @@ def DutchThroughTime():
 # dt1 = DutchThroughTime()
 # dt1 = pd.concat(dt1)
 # dt1.to_csv("sumpercode.csv")
-data = pd.read_csv("sumpercode.csv", index_col=[0])
+# data = pd.read_csv("sumpercode.csv", index_col=[0])
 
 # data = bc1.add_gdp(data, GDP, '2022')
-
-
-
-
 
 # bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y2022_V202401.csv"
 # data = bc1.readindata(bacidata, tmp_save=False)
