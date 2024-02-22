@@ -28,12 +28,14 @@ pd.options.display.max_rows = 50
 # QUESTIONS
 
 # Dutch vulnerablity through time
+# Dutch imports of strategic goods through time
 # Vulnerability is based on the exporting country of a country
     # From which countries does the Netherlands import strategic goods?
     # What is the total value of Dutch imports of strategic goods?, has that volumn changed through time?
 
 
 class baci:
+    '''baci class contains the methods to load baci data and add characteristics such as geographic and strategic'''
     def readindata(self, bacidata, verbose = False, tmp_save = True) -> pd.DataFrame:
         df1 = pd.read_csv(bacidata, usecols=['t','i','j','k','v','q'], 
                           dtype= {'t': 'int64',
@@ -83,7 +85,7 @@ class baci:
         
         return data
        
-    def subsetData(self, data_param: pd.DataFrame(), iso3_param: list[str], imp_exp_param: str, products_param: list[str], minvalue_param=0.0) -> pd.DataFrame():
+    def subsetData(self, data_param: pd.DataFrame, iso3_param: list[str], imp_exp_param: str, products_param: list[str], minvalue_param=0.0) -> pd.DataFrame():
         df1 = data_param.copy()
         if products_param:
             out1 = df1[(df1[imp_exp_param].isin(iso3_param)) & (df1["Product"].isin(products_param))]
@@ -283,8 +285,186 @@ def getStrategicGoods():
     return data
 STRATEGOODS = getStrategicGoods()
 
+def getWGI():
+    wgi = pd.read_csv(r"src\baci\various_codes\WGI_iso3.csv", index_col=[0])
+    wgi.columns = ['ISO3', 'WGI_2022xxx']
+    return wgi
+WGI = getWGI()
+
 # ININTIALIZE object
 bc1 = baci()
+
+def WorldMarketConcentration(data, product, verbose = False):
+    '''
+    CDI1 thus targets products for which EU imports (in values) are highly concentrated
+    in a few extra EU countries using the well-known Herfindahl-Hirschman Index
+    (HHI)
+
+    Following CBS`: De indicator wordt als volgt berekend: neem voor ieder land dat dit product exporteert het aandeel van dit land in de wereldmarkt.
+    '''
+
+    oneProd = data[data['Product'] == product]
+
+    ExporterOfProduct = oneProd['Exporter_ISO3'].unique()
+
+    # fyi: largest 3 non_EU exports in value
+    Exports = oneProd[['Value', 'Exporter_ISO3']]
+    largestExporters = Exports[['Value', 'Exporter_ISO3']].groupby(['Exporter_ISO3']).sum()
+    largestExporters = largestExporters.sort_values(by = ['Value'], ascending=False)
+    totalExportsOfProd = Exports[["Value"]].sum()
+
+    # MUST BE PER-COUNTRY
+    s2_total = 0
+    for st in ExporterOfProduct:
+        ACountryTotalExp = oneProd['Value'][(oneProd['Exporter_ISO3'] == st)].sum()
+        s2 = np.power(ACountryTotalExp/totalExportsOfProd, 2)
+        s2_total = s2_total + s2
+
+    if verbose:
+        print(" Product: ", product,
+            "\n WorldMarketConcentration: ", s2_total,
+            "\n Top three exporters: ", largestExporters.index.tolist()[0:3])
+
+    return s2_total
+# x = WorldMarketConcentration(data, 970600, verbose = False)
+
+def WGI_calc(data, product,  wgi, country_name = 'NLD', verbose = False):
+    '''
+    Following CBS`: De indicator wordt als volgt berekend: neem voor ieder land dat dit product exporteert het aandeel van dit land in de wereldmarkt.
+    NOTE:  I wasn't able to reproduce CBS's analysis, this is purely a application of the HHI index to NLD.
+    '''
+
+    oneProd = data[data['Product'] == product]
+
+    ExporterOfProducttoNLD = oneProd['Exporter_ISO3'][oneProd['Importer_ISO3'] == "NLD"].unique()
+
+    # fyi: largest exports in value to NLD
+    Exports = oneProd[['Value', 'Exporter_ISO3', 'Importer_ISO3']]
+    largestExporterstoNLD = Exports[['Exporter_ISO3', 'Value']][Exports['Importer_ISO3'] == country_name].groupby(['Exporter_ISO3']).sum()
+    largestExporterstoNLD = largestExporterstoNLD.sort_values(by = ['Value'], ascending=False)
+
+    totalExportsOfProdtoNLD = largestExporterstoNLD[["Value"]].sum()
+
+    # MUST BE PER-COUNTRY
+    wgi_total = []
+    thesestatesmissing = []
+    for st in ExporterOfProducttoNLD:
+
+        # some states are missing
+        if (st not in oneProd['Exporter_ISO3'].values) or (st not in wgi["ISO3"].values):
+            thesestatesmissing.append(st)
+            continue
+
+        ACountryTotalExp = oneProd['Value'][(oneProd['Exporter_ISO3'] == st) & (oneProd['Importer_ISO3'] == country_name)].sum()
+        wgi_mult_cntry = wgi[["WGI"]][wgi["ISO3"] == st].values[0][0]
+        percent_ofExports = ACountryTotalExp / totalExportsOfProdtoNLD
+        wgi_weight_cntry =  percent_ofExports * wgi_mult_cntry
+        wgi_total.append(wgi_weight_cntry.tolist()[0])
+
+    total_wgi = sum(wgi_total)
+
+    if verbose:
+        print(" Product: ", product,
+            "\n WGI_forProducut: ", total_wgi,
+            "\n Top three exporters: ", largestExporterstoNLD.index.tolist()[0:3])
+
+    return total_wgi, totalExportsOfProdtoNLD.Value, largestExporterstoNLD.index.tolist(), thesestatesmissing
+
+# x = WGI_calc(data, 80620, wgi1, "NLD",  verbose = False)
+# print(x)
+
+def ImportDiversificationNLD(data, product, country_name = 'NLD', verbose = False):
+    '''
+    Following CBS`: De indicator wordt als volgt berekend: neem voor ieder land dat dit product exporteert het aandeel van dit land in de wereldmarkt.
+    NOTE:  I wasn't able to reproduce CBS's analysis, this is purely a application of the HHI index to NLD.
+    '''
+
+    oneProd = data[data['Product'] == product]
+
+    ExporterOfProducttoNLD = oneProd['Exporter'][oneProd['Importer'] == country_name].unique()
+
+    # fyi: largest exports in value to NLD
+    Exports = oneProd[['Value', 'Exporter', 'Importer']]
+    largestExporterstoNLD = Exports[['Exporter', 'Value']][Exports['Importer'] == country_name].groupby(['Exporter']).sum()
+    largestExporterstoNLD = largestExporterstoNLD.sort_values(by = ['Value'], ascending=False)
+    totalExportsOfProdtoNLD = largestExporterstoNLD[["Value"]].sum()
+    totalnumberofExportstoNLD = largestExporterstoNLD.shape[0]
+
+    topthreeexportersinorder = largestExporterstoNLD.iloc[0:3, 0].index.tolist()
+
+    # if one country supplies more than 50% of value
+    percentonecountry = 100 * (largestExporterstoNLD.iloc[0:1, 0].sum()/totalExportsOfProdtoNLD).values[0]
+    percenttwocountry = 100 * (largestExporterstoNLD.iloc[0:2, 0].sum()/totalExportsOfProdtoNLD).values[0]
+    
+    # get % top three
+    if largestExporterstoNLD.shape[0] >= 3:
+        valuetopthree_ifthree = 100*(largestExporterstoNLD.iloc[0:3, 0].sum()/totalExportsOfProdtoNLD)
+    else:
+        valuetopthree_ifthree = 100*(largestExporterstoNLD.iloc[0:1, 0].sum()/totalExportsOfProdtoNLD)
+
+    # MUST BE PER-COUNTRY
+    # use float here
+    s2_total = 0
+    for st in ExporterOfProducttoNLD:
+        ACountryTotalExp = oneProd['Value'][(oneProd['Exporter'] == st) & (oneProd['Importer'] == country_name)].sum()
+        s2 = np.power(ACountryTotalExp/totalExportsOfProdtoNLD, 2)
+        s2_total = s2_total + s2
+
+    if verbose:
+        print(" Product: ", product,
+              "\n ImportDiversificationNLD: ", s2_total,
+              "\n Top three exporters: ", largestExporterstoNLD.index.tolist()[0:3])
+
+    # ugly code to account for diffeences in values and arrays, must be a better way
+    if type(s2_total) == pd.core.series.Series:
+        s2_total = s2_total.array[0]
+
+    return s2_total, valuetopthree_ifthree['Value'], totalnumberofExportstoNLD, percentonecountry, percenttwocountry, topthreeexportersinorder
+
+# yr = "2022"
+# data = bc1.readindata(bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y"+ str(yr) + "_V202401.csv")
+# data = bc1.addregions(data)
+# data = bc1.subsetStrategicGoods(data, STRATEGOODS)
+# data = data[data['Importer'] == "NLD"]
+
+def add_hhi_tostrategic():
+    yearsData = np.arange(1995, 2023, step=1)
+    yearsdata = []
+    for yr in yearsData:
+        print(yr)
+        data = bc1.readindata(bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y"+ str(yr) + "_V202401.csv")
+        data = bc1.addregions(data)
+        data = bc1.subsetStrategicGoods(data, STRATEGOODS)
+        data = data[data['Importer'] == "NLD"]
+
+        collecthhis = []
+        for prd in data['Product'].unique():
+            out, valuetopthree, totalnumberofExportstoNLD, percentonecountry, percenttwocountry, topthreeexportersinorder = ImportDiversificationNLD(data, prd, verbose = False)
+            collecthhis.append([prd, out, valuetopthree, totalnumberofExportstoNLD, percentonecountry, percenttwocountry, topthreeexportersinorder])
+
+        df1 = pd.DataFrame(collecthhis)
+        df1.columns = ['Product', 'HHI', 'Percenttopthree_ifthree', 'totalnumberofExportstoNLD', 'percentonecountry', 'percenttwocountry', 'topthreeexportersinorder']
+        print(df1)
+
+        data = data.merge(df1, left_on="Product", right_on="Product")
+
+        yearsdata.append(data)
+
+    return yearsdata
+
+# out = add_hhi_tostrategic()
+# out = pd.concat(out)
+# out.to_csv("HHI_concentration.csv")
+from ast import literal_eval
+
+hhi = pd.read_csv("HHI_concentration.csv")
+hhi['LargestExporter'] = [literal_eval(x)[0] for x in hhi['topthreeexportersinorder']]
+
+hhi_wgi = hhi.merge(WGI, left_on="LargestExporter", right_on="ISO3")
+hhi_wgi.drop(columns = ["ISO3"], inplace = True)
+
+hhi_wgi.to_csv("hhi_wgi.csv")
+
 
 # from which regions to the Dutch get, value of imports per region 
 def dutchimportsregionthroughtime():
@@ -310,8 +490,8 @@ def dutchimportsregionthroughtime():
 # print(dt1)
 # dt1.to_csv("sumperregion.csv")
 
-data = pd.read_csv("sumperregion.csv", index_col=[0])
-data.drop(columns=["Micronesia", "Melanesia", "Polynesia"], inplace=True)
+# data = pd.read_csv("sumperregion.csv", index_col=[0])
+# data.drop(columns=["Micronesia", "Melanesia", "Polynesia"], inplace=True)
 # np.log(data).plot()
 # plt.show()
 
@@ -412,7 +592,7 @@ def toptraders2022():
     dt3 = dt2.sort_values(['Value'], ascending=False)
     
     return dt3.index
-toptraders = toptraders2022().tolist()
+#toptraders = toptraders2022().tolist()
 
 def slowmethodtogetregressiondata():
     yearsData = np.arange(1995, 2023, step=1)
@@ -524,9 +704,8 @@ def augmentregressiondata():
     newdata.to_csv("regressionDataAugmented.csv")
 
 # Which countries have had higher than average 
-
-newdata = pd.read_csv('regressionDataAugmented.csv', index_col=[0])
-newdata['Year'] = newdata.index
+# newdata = pd.read_csv('regressionDataAugmented.csv', index_col=[0])
+# newdata['Year'] = newdata.index
 
 def plotdifferences(whichcomparison, whichstates, newdata):
 
@@ -580,7 +759,6 @@ def percentgdptopbottom():
     whichstates = statehighestpercentGDP
     plotdifferences(whichcomparison, whichstates, newdata)
 # percentgdptopbottom()
-
 # get number of rows, assign labels highest, high, average, low, lowest
 
 def addcategorical(data: pd.DataFrame):
@@ -606,9 +784,8 @@ def percenttradetopbottom():
     whichstates = statehighestpercentImports
     plotdifferences(whichcomparison, whichstates, newdata)
 #percenttradetopbottom()
-
-newdata = pd.read_csv('regressionDataAugmented.csv', index_col=[0])
-newdata['Year'] = newdata.index
+# newdata = pd.read_csv('regressionDataAugmented.csv', index_col=[0])
+# newdata['Year'] = newdata.index
 
 # the idea, after having taken into account changes in gdp along with a time trend, how much has the purchase of strategic goods increased.
 # the residuals show us the change in purchases of strategic goods after having removed or reduced the effects of changes in a state's GDP.
@@ -643,18 +820,18 @@ def regressiongdp(data):
 
     return allstateresids, allresidscoef
 
-rg1, coef = regressiongdp(newdata)
-allresids = pd.concat(rg1)
-allcoef = pd.concat(coef)
-print(allresids)
-print(allcoef)
-allcoef.to_csv("allcoef.csv")
-allresids.to_csv("allresids.csv")
+# rg1, coef = regressiongdp(newdata)
+# allresids = pd.concat(rg1)
+# allcoef = pd.concat(coef)
+# print(allresids)
+# print(allcoef)
+# allcoef.to_csv("allcoef.csv")
+# allresids.to_csv("allresids.csv")
 
-allresids = pd.read_csv("allresids.csv", index_col=[0])
+# allresids = pd.read_csv("allresids.csv", index_col=[0])
 
-# which states have shown positive increases in percent
-print(allresids)
+# # which states have shown positive increases in percent
+# print(allresids)
 
 # for st in allresids['state'].unique():
 #     country = allresids[allresids['state'] == st]
