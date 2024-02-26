@@ -70,6 +70,9 @@ class baci:
         df1.drop(columns=['country_code', 'Importer'], inplace = True)
         df1.rename(columns={"country_iso3": "Importer"}, inplace=True)
 
+        # 2015 has some strange data, take only Values greater than 1
+        df1 = df1[df1['Value'] > 10.00]
+
         if verbose:
             hcodes = [str(x)[0:2] for x in df1["Product"]]
             print(set(hcodes))
@@ -159,6 +162,10 @@ class baci:
     def addlongdescription(self, data):
         localdata = data.copy()
         longdesc = pd.read_csv(r"src\baci\data\product_codes_HS92_V202401.csv", dtype = str)
+
+        # this is necessary because codes 1:9 should be 01:09
+        localdata.loc[:, 'Product'] = ["0" + x if len(x) == 5 else x for x in localdata['Product'].astype(str)]
+
         longdesc.rename(columns = {"code": "isocode"}, inplace=True)
         longproddesc = localdata.merge(longdesc, left_on="Product", right_on="isocode", how = 'left', suffixes = ['x', 'y'])
        
@@ -391,7 +398,10 @@ def ImportDiversificationNLD(data, product, country_name = 'NLD', verbose = Fals
     largestExporterstoNLD = Exports[['Exporter', 'Value']][Exports['Importer'] == country_name].groupby(['Exporter']).sum()
     largestExporterstoNLD = largestExporterstoNLD.sort_values(by = ['Value'], ascending=False)
     totalExportsOfProdtoNLD = largestExporterstoNLD[["Value"]].sum()
+
+    # wrong for 2015
     totalnumberofExportstoNLD = largestExporterstoNLD.shape[0]
+    #print('totalnumberofExportstoNLD:',  totalnumberofExportstoNLD)
 
     topthreeexportersinorder = largestExporterstoNLD.iloc[0:3, 0].index.tolist()
 
@@ -424,11 +434,6 @@ def ImportDiversificationNLD(data, product, country_name = 'NLD', verbose = Fals
 
     return s2_total, valuetopthree_ifthree['Value'], totalnumberofExportstoNLD, percentonecountry, percenttwocountry, topthreeexportersinorder
 
-# yr = "2022"
-# data = bc1.readindata(bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y"+ str(yr) + "_V202401.csv")
-# data = bc1.addregions(data)
-# data = bc1.subsetStrategicGoods(data, STRATEGOODS)
-# data = data[data['Importer'] == "NLD"]
 
 def add_hhi_tostrategic():
     yearsData = np.arange(1995, 2023, step=1)
@@ -459,12 +464,11 @@ def add_hhi_tostrategic():
 # out = pd.concat(out)
 # out.to_csv("HHI_concentration.csv")
 
-
-# hhi = pd.read_csv("HHI_concentration.csv")
-# hhi['LargestExporter'] = [literal_eval(x)[0] for x in hhi['topthreeexportersinorder']]
-# hhi_wgi = hhi.merge(WGI, left_on="LargestExporter", right_on="ISO3")
-# hhi_wgi.drop(columns = ["ISO3"], inplace = True)
-# hhi_wgi.to_csv("hhi_wgi.csv")
+hhi = pd.read_csv("HHI_concentration.csv")
+hhi['LargestExporter'] = [literal_eval(x)[0] for x in hhi['topthreeexportersinorder']]
+hhi_wgi = hhi.merge(WGI, left_on="LargestExporter", right_on="ISO3")
+hhi_wgi.drop(columns = ["ISO3"], inplace = True)
+hhi_wgi.to_csv("hhi_wgi.csv")
 
 def avgoverregions_HHI():
     data = pd.read_csv("hhi_wgi.csv")
@@ -473,8 +477,137 @@ def avgoverregions_HHI():
     mean_perregion_HHI.sort_values(['HHI'], ascending = False, inplace = True)
     mean_perregion_HHI.to_csv("mean_perregion_HHI.csv")
 
-avgoverregions_HHI()
+#avgoverregions_HHI()
 
+# select HHI greater than x and value greater than y
+# has the HHI become worse
+
+def plothhithroughtime():
+    data = pd.read_csv("hhi_wgi.csv")    
+
+    ############
+    data = data[data['Value'] >= 500]
+
+    data = bc1.addlongdescription(data)
+
+    # hhi through time avg all Dutch imports
+    avgHHI = data[['HHI', 'Year']].groupby(['Year']).mean()
+
+    theseitems = ['Cobalt', 'Lithium', 'Zinc', 'Aluminium', 'Nickel', 'Copper']
+
+    allnumbersellers = []
+    allcommodities = []
+    for i in theseitems:
+        print(str.lower(i))
+        selectthese = [x for x in data['description'] if i in x or str.lower(i) in x]
+        data1 = data[data['description'].isin(selectthese)]
+        data2 = data1[['HHI', 'Year']].groupby(['Year']).mean()
+        data2.columns = [i]
+
+        allcommodities.append(data2)
+
+    data = pd.concat(allcommodities, axis=1)
+    data['Average'] = avgHHI
+    print(data)
+
+    plt.rcParams['figure.figsize'] = 10, 7
+  
+    lastyear = []
+    for i in range(0, data.shape[1]):
+        colname = data.columns[i]
+        end_value = data.iloc[:,i].values[-1].round(2)
+        lastyear.append(pd.DataFrame({'Value': [end_value], 'Col': [colname]}))
+
+        if colname == 'Average':
+            name_column = data.columns[i]
+            plt.plot(data.index, data.iloc[:,i].round(2), label = name_column)
+            plt.text(2022, end_value, name_column + " " + str(end_value), fontsize = 6)
+            plt.title("HHI through time important commodity groups")
+        elif colname == 'Nickel':
+            name_column = data.columns[i]
+            plt.plot(data.index, data.iloc[:,i].round(2), label = name_column)
+            plt.text(2022, end_value + .001, name_column + " " + str(end_value), fontsize = 6)    
+
+        else:
+            name_column = data.columns[i]
+            plt.plot(data.index, data.iloc[:,i].round(2), label = name_column)
+            plt.text(2022, end_value, name_column + " " + str(end_value), fontsize = 6)
+        
+    t1 = pd.concat(lastyear)
+    print(t1.sort_values("Value"))
+    plt.legend(loc="upper left",  fontsize="6") 
+    plt.savefig(r"output\hhicommodities",bbox_inches='tight')
+    plt.show()
+
+plothhithroughtime()
+ 
+def allsellersthroughtime():
+    
+    data = pd.read_csv("hhi_wgi.csv")    
+    
+    #######################
+    #data = data[data['Value'] >= 500]
+    
+    data = bc1.addlongdescription(data)
+
+    # hhi through time avg all Dutch imports
+    avgNumSellers = data[['totalnumberofExportstoNLD', 'Year']].groupby(['Year']).mean()
+
+    theseitems = ['Cobalt', 'Lithium', 'Zinc', 'Aluminium', 'Nickel', 'Copper']
+    
+    allnumbersellers = []
+    for i in theseitems:
+        print(str.lower(i))
+        selectthese = [x for x in data['description'] if i in x or str.lower(i) in x]
+        data1 = data[data['description'].isin(selectthese)]
+
+        datanumsellers = data1[['totalnumberofExportstoNLD', 'Year']].groupby(['Year']).mean()
+        datanumsellers.columns = [i]
+
+        allnumbersellers.append(datanumsellers)
+
+    data = pd.concat(allnumbersellers, axis=1)
+    data['Average'] = avgNumSellers
+    
+    ##################
+    # plot
+    ##################
+
+    plt.rcParams['figure.figsize'] = 10, 7
+  
+    lastyear = []
+    for i in range(0, data.shape[1]):
+        colname = data.columns[i]
+        end_value = data.iloc[:,i].values[-1].round(2)
+        lastyear.append(pd.DataFrame({'Value': [end_value], 'Col': [colname]}))
+
+        if colname == 'Average':
+            name_column = data.columns[i]
+            plt.plot(data.index, data.iloc[:,i].round(2), label = name_column)
+            plt.text(2022, end_value, name_column + " " + str(end_value), fontsize = 6)
+            plt.title("Number importers through time important commodity groups")
+        elif colname == 'Nickel':
+            name_column = data.columns[i]
+            plt.plot(data.index, data.iloc[:,i].round(2), label = name_column)
+            plt.text(2022, end_value + .000, name_column + " " + str(end_value), fontsize = 6)    
+        else:
+            name_column = data.columns[i]
+            plt.plot(data.index, data.iloc[:,i].round(2), label = name_column)
+            plt.text(2022, end_value, name_column + " " + str(end_value), fontsize = 6)
+        
+    t1 = pd.concat(lastyear)
+    print(t1.sort_values("Value"))
+    plt.legend(loc="upper left",  fontsize="6") 
+    plt.savefig(r"output\numberimporters",bbox_inches='tight')
+    #plt.show()
+
+
+    return allnumbersellers
+
+allsellersthroughtime()
+
+
+# look at most valuable products, assess hhi
 
 # def combinehhiwgi_shortdescrip():
 #     data = pd.read_csv("hhi_wgi.csv")
@@ -575,7 +708,7 @@ def regionalexportersdetail():
         
     pd.concat(topthreeperregion).to_csv("tmp12.csv")
 
-regionalexportersdetail()
+# regionalexportersdetail()
 
 # relative to other countries, how much have imports of strategic goods increased through time.  To compare with other countrie, remove the effects of gdp
 # first, get top trader importers in terms of total trade
@@ -650,7 +783,7 @@ def toptraders2022():
     dt3 = dt2.sort_values(['Value'], ascending=False)
     
     return dt3.index
-toptraders = toptraders2022().tolist()
+#toptraders = toptraders2022().tolist()
 
 def slowmethodtogetregressiondata():
     yearsData = np.arange(1995, 2023, step=1)
@@ -762,8 +895,8 @@ def augmentregressiondata():
     newdata.to_csv("regressionDataAugmented.csv")
 
 # Which countries have had higher than average 
-newdata = pd.read_csv('regressionDataAugmented.csv', index_col=[0])
-newdata['Year'] = newdata.index
+# newdata = pd.read_csv('regressionDataAugmented.csv', index_col=[0])
+# newdata['Year'] = newdata.index
 # print(newdata)
 
 def plotdifferences(whichcomparison, whichstates, newdata, logornot = False):
