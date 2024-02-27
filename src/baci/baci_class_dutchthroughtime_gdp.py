@@ -537,9 +537,9 @@ def plothhithroughtime():
     print(t1.sort_values("Value"))
     plt.legend(loc="upper left",  fontsize="6") 
     plt.savefig(r"output\hhicommodities",bbox_inches='tight')
-    plt.show()
+    #plt.show()
 
-plothhithroughtime()
+# plothhithroughtime()
  
 def allsellersthroughtime():
     
@@ -551,7 +551,7 @@ def allsellersthroughtime():
     data = bc1.addlongdescription(data)
 
     # hhi through time avg all Dutch imports
-    avgNumSellers = data[['totalnumberofExportstoNLD', 'Year']].groupby(['Year']).mean()
+    avgNumSellers = data[['Exporter', 'Year']].groupby(['Year']).nunique()
 
     theseitems = ['Cobalt', 'Lithium', 'Zinc', 'Aluminium', 'Nickel', 'Copper']
     
@@ -561,7 +561,7 @@ def allsellersthroughtime():
         selectthese = [x for x in data['description'] if i in x or str.lower(i) in x]
         data1 = data[data['description'].isin(selectthese)]
 
-        datanumsellers = data1[['totalnumberofExportstoNLD', 'Year']].groupby(['Year']).mean()
+        datanumsellers = data1[['Exporter', 'Year']].groupby(['Year']).nunique()
         datanumsellers.columns = [i]
 
         allnumbersellers.append(datanumsellers)
@@ -578,21 +578,21 @@ def allsellersthroughtime():
     lastyear = []
     for i in range(0, data.shape[1]):
         colname = data.columns[i]
-        end_value = data.iloc[:,i].values[-1].round(2)
+        end_value = data.iloc[:,i].values[-1].round(0)
         lastyear.append(pd.DataFrame({'Value': [end_value], 'Col': [colname]}))
 
         if colname == 'Average':
             name_column = data.columns[i]
-            plt.plot(data.index, data.iloc[:,i].round(2), label = name_column)
+            plt.plot(data.index, data.iloc[:,i].round(0), label = name_column)
             plt.text(2022, end_value, name_column + " " + str(end_value), fontsize = 6)
-            plt.title("Number importers through time important commodity groups")
-        elif colname == 'Nickel':
+            plt.title("Number exporters through time by important commodity groups")
+        elif colname == 'Lithium':
             name_column = data.columns[i]
-            plt.plot(data.index, data.iloc[:,i].round(2), label = name_column)
-            plt.text(2022, end_value + .000, name_column + " " + str(end_value), fontsize = 6)    
+            plt.plot(data.index, data.iloc[:,i].round(0), label = name_column)
+            plt.text(2022, end_value + .5, name_column + " " + str(end_value), fontsize = 6)    
         else:
             name_column = data.columns[i]
-            plt.plot(data.index, data.iloc[:,i].round(2), label = name_column)
+            plt.plot(data.index, data.iloc[:,i].round(0), label = name_column)
             plt.text(2022, end_value, name_column + " " + str(end_value), fontsize = 6)
         
     t1 = pd.concat(lastyear)
@@ -601,10 +601,138 @@ def allsellersthroughtime():
     plt.savefig(r"output\numberimporters",bbox_inches='tight')
     #plt.show()
 
-
     return allnumbersellers
 
-allsellersthroughtime()
+# allsellersthroughtime()
+
+# are the countries policitally stable
+def wgimeasure(prodname):
+
+    plt.rcParams['figure.figsize'] = 10, 7
+
+    data = pd.read_csv("hhi_wgi.csv")        
+    data = bc1.addlongdescription(data)
+    theseitems = [prodname]
+    
+    WGI = getWGI()
+
+    allitems = []
+    for i in theseitems:
+        print(str.lower(i))
+        selectthese = [x for x in data['description'] if i in x or str.lower(i) in x]
+        data1 = data[data['description'].isin(selectthese)]
+
+    data2 = data1[['Year', 'Value', 'Exporter', 'Product']]
+    data3 = data2.merge(WGI, left_on = "Exporter", right_on = "ISO3")    
+ 
+    allyrs = []
+    for yr in data3['Year'].unique():
+        datayr = data3[data3["Year"] == yr]
+        allprod = []
+        for prd in datayr['Product'].unique():
+            datayrprod = datayr[datayr['Product'] == prd]
+            valueprod = datayrprod['Value'].sum()
+            datayrprod['product'] = (datayrprod['WGI_2022xxx'] * datayrprod['Value'])/valueprod
+            wdisum = datayrprod['product'].sum()
+            allprod.append(wdisum)
+    
+        allyrs.append(allprod)
+        
+    
+    data = pd.DataFrame(data = allyrs, index = data3['Year'].unique())
+    data.columns = datayr['Product'].unique()
+
+    ################################
+    ################################
+    lastyear = []
+    for i in range(0, data.shape[1]):
+        colname = data.columns[i]
+        end_value = data.iloc[:,i].values[-1]
+        lastyear.append(pd.DataFrame({'Value': ["{:.2f}".format(end_value)], 'Col': [colname]}))
+
+        name_column = data.columns[i]
+        plt.plot(data.index, data.iloc[:,i], label = name_column)
+        plt.text(2022, end_value, name_column + " " + str("{:.2f}".format(end_value)), fontsize = 6)
+        plt.title("Value weighted WGI per product per year for " + prodname)
+        
+    t1 = pd.concat(lastyear)
+    print(t1.sort_values("Value"))
+    plt.legend(loc="upper left",  fontsize="6") 
+    plt.savefig(r"output\wgiweighted" + prodname,bbox_inches='tight')
+
+    return data
+
+xyz = wgimeasure(prodname = 'Lithium')
+print(xyz)
+
+
+
+
+
+def wgicountries():
+    data = pd.read_csv("hhi_wgi.csv")    
+    
+    #######################
+    #data = data[data['Value'] >= 500]
+    
+    data = bc1.addlongdescription(data)
+
+    # hhi through time avg all Dutch WGI (not necessary, only one year of data)
+    avgWGI = data[['WGI_2022xxx', 'Year']].groupby(['Year']).mean()
+
+    theseitems = ['Lithium'] #, 'Cobalt', 'Zinc', 'Aluminium', 'Nickel', 'Copper']
+    
+    allitems = []
+    for i in theseitems:
+        print(str.lower(i))
+        selectthese = [x for x in data['description'] if i in x or str.lower(i) in x]
+        data1 = data[data['description'].isin(selectthese)]
+        data1.to_csv("abc.csv")
+        meanx = data1[['WGI_2022xxx', 'Year']].groupby(['Year']).mean()
+        stdx = data1[['WGI_2022xxx', 'Year']].groupby(['Year']).std()
+        allitems.append(pd.concat([meanx, stdx], axis=1))
+       
+    data = pd.concat(allitems)
+    data.columns = ['Mean', 'Std']
+    return data
+
+#xx = wgicountries()
+#print(xx)
+#xx.to_csv("tmp222222.csv")
+
+# take the lowest level of aggregation for one product group
+
+def lithium():
+    data = pd.read_csv("hhi_wgi.csv")    
+    
+    data = bc1.addlongdescription(data)
+
+    theseitems = ['Lithium']
+    
+    allitems = []
+    for i in theseitems:
+        print(str.lower(i))
+        selectthese = [x for x in data['description'] if i in x or str.lower(i) in x]
+        data1 = data[data['description'].isin(selectthese)]
+        numberofproductsperyear = data1[['Year', 'Product']].groupby(['Year']).nunique()
+        numberofexportperyear = data1[['Exporter', 'Year', 'Product']].groupby(['Year', 'Product']).nunique()
+        numberofexportperyear.to_csv("tmy.csv")
+        namesexporters = data1[['Exporter', 'Year', 'Product']].groupby(['Year', 'Exporter']).nunique()
+        namesexporters.to_csv("tmz.csv")
+        valueperproduct = data1[['Year', 'Product', 'Exporter', 'Value']].groupby(['Year', 'Exporter', 'Product']).sum()
+        valueperproduct.to_csv("tmx.csv")
+        valueperproduct['Exporter1'] = valueperproduct.index
+        percountry = valueperproduct[['Exporter1', 'Value']].groupby(['Exporter']).sum()
+        percountry.to_csv("tmxx.csv")
+
+        allitems.append(pd.concat([numberofproductsperyear]))
+    data = pd.concat(allitems, axis=1)
+    data.columns = theseitems
+    return data
+
+#lithium()
+
+
 
 
 # look at most valuable products, assess hhi
