@@ -5,40 +5,67 @@ import numpy as np
 from functools import reduce
 import itertools
 from ast import literal_eval #converts object list to list of strings
-
-os.chdir(r'C:\Users\jpark\VSCode\trade_warning\\')
-
-from combine_country_regions import country_mappings
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
-
 import statsmodels.api as sm
 from statsmodels.formula.api import ols
 
+# this points to a Python file with the function country_mappings (not used)
+from combine_country_regions import country_mappings
+
+# not great practice, but this removes warnings from the output
 import warnings
 warnings.filterwarnings("ignore")
 
-# from config.defintions import ROOT_DIR
-# DATA_DIR = os.path.join(ROOT_DIR, 'data\\')
-# FIGURES_DIR = os.path.join(ROOT_DIR, 'data\\output\\forfigures\\')
-
+# display settings so I can see more on the screen
 desired_width=1000
 pd.set_option('display.width', desired_width)
 pd.set_option('display.max_columns',10)
 pd.options.display.max_rows = 50
 
+#############################################################
+# set this to point to your folder or create a new folder,
+# (in my case my computer is called jpark and I called the folder trade_warning) 
+#############################################################
+os.chdir(r'C:\Users\jpark\VSCode\trade_warning\\')
+
+# points to country codes as defined by BACI
+COUNTRY_CODES = r"src\baci\data\country_codes_V202401.csv"
+# point to product codes
+PRODUCT_DESCRIPTION = r"src\baci\data\product_codes_HS92_V202401.csv"
+# add region data, might be better sources
+ADD_REGIONS = r"data\\iso_countries_regions.csv"
+# add short HS2 description (could be better descriptions)
+SHORT_CODES = r"src\baci\data\hs6twodigits.csv"
+# add long product description
+LONG_DESCRIPTION = r"src\baci\data\product_codes_HS92_V202401.csv"
+# add gdp data
+GDP_DATA = r"data\\global_gdp.csv"
+# strategic goods
+STRATEGIC_GOODS = r"src\\pdf_extractor\\strategicProducts.csv"
+# wgi values
+WGI_VALUES = r"src\baci\various_codes\WGI_iso3.csv"
+# location of BACI unpacked data, note(!) last part of string, I keep the year 
+# as a variable, so I can write, for instance:
+# j = 2022
+# BACI_DATA + str(j) + "_V202401.csv"
+BACI_DATA = r"C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y"
+
 # QUESTIONS
 
 # Dutch vulnerablity through time
 # Dutch imports of strategic goods through time
-# Vulnerability is based on the exporting country of a country
+# Vulnerability is partially based on the conditions of an exporting country
     # From which countries does the Netherlands import strategic goods?
-    # What is the total value of Dutch imports of strategic goods?, has that volumn changed through time?
-
+    # What is the total value of Dutch imports of strategic goods?, has that volume changed through time?
+# How has the vulnerability of a product that the Netherlands imports change through time
+# Look at value of imports through time.  
+# Histogram of WGI value
 
 class baci:
     '''baci class contains the methods to load baci data and add characteristics such as geographic and strategic'''
     def readindata(self, bacidata, verbose = False, tmp_save = True) -> pd.DataFrame:
+        '''main method to read in baci data'''
         df1 = pd.read_csv(bacidata, usecols=['t','i','j','k','v','q'], 
                           dtype= {'t': 'int64',
                                   'i': 'int64', 
@@ -49,55 +76,62 @@ class baci:
                           )
 
         # This is too complicated, but '   NA' should be converted to float
-        df1['q'] = df1['q'].apply(lambda x: x.strip())
-        df1['q'].replace('NA', np.NaN, inplace=True)
+        df1['q'] = df1['q'].apply(lambda x: x.strip()) # remove spaces in data
+        df1['q'].replace('NA', np.NaN, inplace=True)   # np.NaN is different than string NaN
         df1['q'] = df1['q'].astype(float)
 
-        #dimensions
-        #print("shape", df1.shape)
-
-        # rename columns to make them meaningful
+        # rename columns to make them meaningful to humans
         df1.rename(columns={'t': 'Year', 'i': 'Exporter', 'j': 'Importer', 'k': 'Product', 'v': 'Value', 'q': 'Quantity'}, inplace=True)
 
-        # replace number with name of country exporter
-        iso1 = pd.read_csv(r"src\baci\data\country_codes_V202401.csv", usecols=['country_code', 'country_iso3'])
+        # replace number with name of country *exporter* 
+        iso1 = pd.read_csv(COUNTRY_CODES, usecols=['country_code', 'country_iso3'])
         df1 = df1.merge(iso1, left_on="Exporter", right_on="country_code", how="left")
         df1.drop(columns=['country_code', 'Exporter'], inplace = True)
         df1.rename(columns={"country_iso3": "Exporter"}, inplace=True)
     
-        # replace number with name of country importer
+        # replace number with name of country *importer*
         df1 = df1.merge(iso1, left_on="Importer", right_on="country_code", how="left")
         df1.drop(columns=['country_code', 'Importer'], inplace = True)
         df1.rename(columns={"country_iso3": "Importer"}, inplace=True)
 
-        # 2015 has some strange data, take only Values greater than 1
+        # 2015 has some strange data, take only Values greater than 10.00, otherwise number of exporting countries in 2015 is an outlier
         df1 = df1[df1['Value'] > 10.00]
 
+        # if verbose is True, this will print out
         if verbose:
             hcodes = [str(x)[0:2] for x in df1["Product"]]
             print(set(hcodes))
             print(len(set(hcodes)))
 
+        # make product code and int, otherwise its an object which can be confusing
+        df1['Product'] = df1['Product'].astype(int)    
+
         return df1
     
     def addprodcode(self, data):
+        '''add the product description if needed'''
         # add product_codes
-        prodcodes = pd.read_csv(r"src\baci\data\product_codes_HS92_V202401.csv", usecols=['code', 'description'])
+        prodcodes = pd.read_csv(PRODUCT_DESCRIPTION, usecols=['code', 'description'])
+        # product '9999AA' appears to be a filler--empty
         mask = prodcodes['code'] == '9999AA'
         prodcodes = prodcodes[~mask]
-        #prodcodes['code'] = prodcodes['code'].astype('int64')
+        # I love merges, note its a left merge, I want all baci data to have a code, but dont care for product codes without products.
         data = data.merge(prodcodes, left_on = "Product", right_on = "code", how = "left")
         
         return data
        
     def subsetData(self, data_param: pd.DataFrame, iso3_param: list[str], imp_exp_param: str, products_param: list[str], minvalue_param=0.0) -> pd.DataFrame():
+        '''Select the importing (so not exporting at this point) country and the product, can be extended to select exporters'''
+        
         df1 = data_param.copy()
+
+        # select the importing (so, again, not exporting at this point) country and the product
         if products_param:
             out1 = df1[(df1[imp_exp_param].isin(iso3_param)) & (df1["Product"].isin(products_param))]
             out1.sort_values(by=['Value', 'Importer'], inplace=True, ascending=False)
             out1 = out1[out1['Value'] >= minvalue_param]
             out1['Value'] = out1['Value'].astype(int)
-        else: # return all products
+        else: # return all products in no product selected
             out1 = df1[df1[imp_exp_param].isin(iso3_param)]
             out1.sort_values(by=['Value', 'Importer'], inplace=True, ascending=False)
             out1 = out1[out1['Value'] >= minvalue_param]
@@ -105,14 +139,16 @@ class baci:
 
         return out1
     
-    def subsetStrategicGoods(self, data, strategicProducts: list):
+    def subsetStrategicGoods(self, data, STRATEGICGOODS: list):
+        '''Selects products based on a list of strings'''
         df1 = data.copy()
-        df2 = df1[df1['Product'].isin(strategicProducts)]
+        df2 = df1[df1['Product'].isin(STRATEGICGOODS)]
         return df2
     
     def addregions(self, data):
-        regions = pd.read_csv("data\\iso_countries_regions.csv")
-       
+        '''Add regions to data, there are two of these almost identical functions, I need to combine them or get rid of one of them'''
+        regions = pd.read_csv(ADD_REGIONS)
+    
         # Exporter
         exp = data.merge(regions, left_on="Exporter", right_on="alpha-3", how="left")
         exp.drop(columns=['alpha-2', 'alpha-3', 'country-code', 'name', 'iso_3166-2', 'intermediate-region', 'region-code', 'sub-region-code', 'intermediate-region-code', 'Unnamed: 12'], inplace = True)
@@ -126,14 +162,15 @@ class baci:
         return data
 
     def addregion(self, data, exim):
+        '''Add regions to data, there are two of these almost identical functions, I need to combine them or get rid of one of them'''
         if exim == "Exporter":
-            iso_regions = pd.read_csv(r"src\baci\data\iso_countries_regions.csv")
+            iso_regions = pd.read_csv(ADD_REGIONS)
             iso_regions = iso_regions[['alpha-3', 'region']]
             data = data.merge(iso_regions, left_on="Exporter", right_on="alpha-3", how="left")
             data.rename(columns = {'region': 'Exporter_Region'}, inplace = True)
             data.drop(columns=["alpha-3"], inplace=True)
         elif exim == "Importer":
-            iso_regions = pd.read_csv(r"src\baci\data\iso_countries_regions.csv")
+            iso_regions = pd.read_csv(ADD_REGIONS)
             iso_regions = iso_regions[['alpha-3', 'region']]
             data = data.merge(iso_regions, left_on="Importer", right_on="alpha-3", how="left")
             data.rename(columns = {'region': 'Importer_Region'}, inplace = True)
@@ -144,8 +181,10 @@ class baci:
         return data
 
     def addshortdescriptoProdname(self, data):
+        '''Add short product description based on codes'''
+
         localdata = data.copy()
-        prod_h6 = pd.read_csv(r"src\baci\data\hs6twodigits.csv", dtype = str)
+        prod_h6 = pd.read_csv(SHORT_CODES, dtype = str)
 
         # this is necessary because codes 1:9 should be 01:09
         localdata.loc[:, 'code'] = ["0" + x if len(x) == 5 else x for x in localdata['Product'].astype(str)]
@@ -160,8 +199,9 @@ class baci:
         return proddesc
     
     def addlongdescription(self, data):
+        '''Add product product description based on codes'''
         localdata = data.copy()
-        longdesc = pd.read_csv(r"src\baci\data\product_codes_HS92_V202401.csv", dtype = str)
+        longdesc = pd.read_csv(LONG_DESCRIPTION, dtype = str)
 
         # this is necessary because codes 1:9 should be 01:09
         localdata.loc[:, 'Product'] = ["0" + x if len(x) == 5 else x for x in localdata['Product'].astype(str)]
@@ -176,6 +216,7 @@ class baci:
         return longproddesc
     
     def add_gdp(self, data, GDP, year):
+        '''Join GDP to data'''
 
         ### join GDP to data
         
@@ -202,16 +243,17 @@ class baci:
         return data
          
     def valueacrossallcountries(self, data_param: pd.DataFrame()):
+        '''sums value across all product categories'''
+
         ### Relative size of Step1 inputs per product
         g = data_param[['Product', 'Value']].groupby(['Product']).sum()
         valueofStep1products = g.apply(lambda x: x.sort_values(ascending=False))
         valueofStep1products['Percentage'] = 100 * (valueofStep1products / valueofStep1products['Value'].sum())
 
-        print(valueofStep1products)
-
         return valueofStep1products
 
     def valuepercountryacrossprods(self, data_param, imp_exp_param):
+        '''not used, finds percentage of a product category compared to total'''
         ### Relative size of Step1 inputs per exporter
         g = data_param[[imp_exp_param, 'Value']].groupby([imp_exp_param]).sum()
         valueofStep1perExporter = g.apply(lambda x: x.sort_values(ascending=False))
@@ -221,7 +263,7 @@ class baci:
         return valueofStep1perExporter
 
     def valueperprod(self, data_param, imp_exp_param):
-
+        '''not used, another means to get summed value of exported or imported product categories'''
         exp1 = data_param[['Value', imp_exp_param, 'Product']]
         g = exp1.groupby([imp_exp_param, 'Product']).sum().reset_index()  #this is now a data frame
 
@@ -236,14 +278,12 @@ class baci:
         return pd.concat(allprods)
 
     def OECD_agg(self, data_param, baci_countries_param, imp_exp_param):
-
-        print(imp_exp_param)
-
+        '''not used, if the country a member of the OECD, get percentage of value of OECD exports/imports'''
+        
         assert (imp_exp_param == 'Exporter_ISO3') or (imp_exp_param == 'Importer_ISO3'), "needs to be Exporter_ISO3 or Importer_ISO3"
 
         grp_perCountry = data_param[['Value', imp_exp_param]].groupby([imp_exp_param]).sum().reset_index()
-        merged1 = grp_perCountry.merge(baci_countries_param[['ISO3', 'OECD']], left_on=imp_exp_param, right_on="ISO3",
-                                   how="left")
+        merged1 = grp_perCountry.merge(baci_countries_param[['ISO3', 'OECD']], left_on=imp_exp_param, right_on="ISO3", how="left")
 
         out = merged1[[imp_exp_param, 'Value', 'OECD']].groupby(['OECD']).sum().reset_index()
         out['Percentage'] = 100 * (out['Value'] / out['Value'].sum())
@@ -253,7 +293,8 @@ class baci:
         return out
 
     def strategicgoodExportingImportingregions(self, data, impexp: str):
-        
+        '''sum of value of strategic imports/exports grouped by region'''
+
         if impexp == 'Importer':
             data = bc1.addregion(data, exim='Importer')
             regionValue = data[['Value', 'Importer_Region']].groupby('Importer_Region').sum()
@@ -271,72 +312,85 @@ class baci:
             print("Major strategic exporting states: ", stateValue.sort_values(['Value'], ascending = False))
 
     def typesofstrategicgoods(self, data):
+        '''not used, just sums value by product code and sorts, done in other code'''
         valuestrategicgood = data[['Value', 'code']].groupby("code").sum()
         strategicproducts = valuestrategicgood.sort_values(['Value'], ascending = False)
-    
-        HS6codestrategic = set([str(x)[0:2] for x in data["Product"]])
+
             
         return strategicproducts
 
 def GDPData():
+    '''should alway be run, need to move to BACI class'''
     # https://data.worldbank.org/indicator/NY.GDP.MKTP.CD?end=2022&start=1960&view=chart
     # Taiwan comes from IMF data, added by hand. https://www.imf.org/external/datamapper/NGDPD@WEO/OEMDC/ADVEC/WEOWORLD
-    data = pd.read_csv(r"data\\global_gdp.csv", index_col=[1], skiprows=4)
+    
+    data = pd.read_csv(GDP_DATA, index_col=[1], skiprows=4)
     data = data.drop(columns=['Country Name', 'Indicator Code', 'Indicator Name'])
     data = data.T
     return data
 GDP = GDPData()
 
 def getStrategicGoods():
-    data = pd.read_csv(r"src\\pdf_extractor\\strategicProducts.csv", index_col=[0],
-        dtype= {'0': 'object'}
-        )
+    '''should alway be run, need to move to BACI class'''
+    data = pd.read_csv(STRATEGIC_GOODS, index_col=[0],dtype= {'0': 'object'})
+    # objects to ints
+    data.iloc[:,0] = data.iloc[:,0].astype(int)
     data = data.iloc[:,0].tolist()
+
     return data
-STRATEGOODS = getStrategicGoods()
+STRATEGICGOODS = getStrategicGoods()
 
 def getWGI():
-    wgi = pd.read_csv(r"src\baci\various_codes\WGI_iso3.csv", index_col=[0])
+    '''should alway be run, need to move to BACI class'''
+    wgi = pd.read_csv(WGI_VALUES, index_col=[0])
     wgi.columns = ['ISO3', 'WGI_2022xxx']
     return wgi
 WGI = getWGI()
 
-# ININTIALIZE object
+#############################################################
+# INITIALIZE object, needs to be run to create a BACI object instance
 bc1 = baci()
+#############################################################
+
+# test data
+j = 2022
+bacidata = BACI_DATA + str(j) + "_V202401.csv"
+test_data = bc1.readindata(bacidata, verbose = False, tmp_save = False)
 
 def WorldMarketConcentration(data, product, verbose = False):
     '''
-    CDI1 thus targets products for which EU imports (in values) are highly concentrated
-    in a few extra EU countries using the well-known Herfindahl-Hirschman Index
-    (HHI)
-
-    Following CBS`: De indicator wordt als volgt berekend: neem voor ieder land dat dit product exporteert het aandeel van dit land in de wereldmarkt.
+      Following CBS`: De indicator wordt als volgt berekend: neem voor ieder land dat dit product exporteert het aandeel van dit land in de wereldmarkt.
     '''
-
+    # select the product
     oneProd = data[data['Product'] == product]
 
-    ExporterOfProduct = oneProd['Exporter_ISO3'].unique()
+    # who exports this product
+    ExporterOfProduct = oneProd['Exporter'].unique()
 
-    # fyi: largest 3 non_EU exports in value
-    Exports = oneProd[['Value', 'Exporter_ISO3']]
-    largestExporters = Exports[['Value', 'Exporter_ISO3']].groupby(['Exporter_ISO3']).sum()
-    largestExporters = largestExporters.sort_values(by = ['Value'], ascending=False)
+    Exports = oneProd[['Value', 'Exporter']]
     totalExportsOfProd = Exports[["Value"]].sum()
 
-    # MUST BE PER-COUNTRY
-    s2_total = 0
+    # largest 3 non_EU exports in value, not needed but nice to check
+    largestExporters = Exports[['Value', 'Exporter']].groupby(['Exporter']).sum()
+    largestExporters = largestExporters.sort_values(by = ['Value'], ascending=False)
+    
+    # MUST BE RUN PER-COUNTRY
+    running_total = 0
     for st in ExporterOfProduct:
-        ACountryTotalExp = oneProd['Value'][(oneProd['Exporter_ISO3'] == st)].sum()
-        s2 = np.power(ACountryTotalExp/totalExportsOfProd, 2)
-        s2_total = s2_total + s2
+        ACountryTotalExp = oneProd['Value'][(oneProd['Exporter'] == st)].sum()
+        tt = np.power(ACountryTotalExp/totalExportsOfProd, 2)
+        running_total = running_total + tt
 
     if verbose:
         print(" Product: ", product,
             "\n WorldMarketConcentration: ", s2_total,
             "\n Top three exporters: ", largestExporters.index.tolist()[0:3])
 
-    return s2_total
-# x = WorldMarketConcentration(data, 970600, verbose = False)
+    return running_total
+
+# note that the product code is an int so product 071332 should be entered as 71332
+out = WorldMarketConcentration(test_data, 71332, verbose = False)
+print(out)
 
 def WGI_calc(data, product,  wgi, country_name = 'NLD', verbose = False):
     '''
@@ -344,30 +398,32 @@ def WGI_calc(data, product,  wgi, country_name = 'NLD', verbose = False):
     NOTE:  I wasn't able to reproduce CBS's analysis, this is purely a application of the HHI index to NLD.
     '''
 
+    # select the one product
     oneProd = data[data['Product'] == product]
 
-    ExporterOfProducttoNLD = oneProd['Exporter_ISO3'][oneProd['Importer_ISO3'] == "NLD"].unique()
+    ExporterOfProducttocountry = oneProd['Exporter'][oneProd['Importer'] == country_name].unique()
 
-    # fyi: largest exports in value to NLD
-    Exports = oneProd[['Value', 'Exporter_ISO3', 'Importer_ISO3']]
-    largestExporterstoNLD = Exports[['Exporter_ISO3', 'Value']][Exports['Importer_ISO3'] == country_name].groupby(['Exporter_ISO3']).sum()
-    largestExporterstoNLD = largestExporterstoNLD.sort_values(by = ['Value'], ascending=False)
+    # Exports
+    Exports = oneProd[['Value', 'Exporter', 'Importer']]
+    largestExporterstocountry = Exports[['Exporter', 'Value']][Exports['Importer'] == country_name].groupby(['Exporter']).sum()
+    largestExporterstocountry = largestExporterstocountry.sort_values(by = ['Value'], ascending=False)
 
-    totalExportsOfProdtoNLD = largestExporterstoNLD[["Value"]].sum()
+    # confusing, but largestExporterstocountry includes all countries exporting to a country
+    totalExportsOfProdtocountry = largestExporterstocountry[["Value"]].sum()
 
     # MUST BE PER-COUNTRY
     wgi_total = []
     thesestatesmissing = []
-    for st in ExporterOfProducttoNLD:
+    for st in ExporterOfProducttocountry:
 
-        # some states are missing
-        if (st not in oneProd['Exporter_ISO3'].values) or (st not in wgi["ISO3"].values):
+        # some states are missing, skip to next one
+        if (st not in oneProd['Exporter'].values) or (st not in wgi["ISO3"].values):
             thesestatesmissing.append(st)
             continue
 
-        ACountryTotalExp = oneProd['Value'][(oneProd['Exporter_ISO3'] == st) & (oneProd['Importer_ISO3'] == country_name)].sum()
-        wgi_mult_cntry = wgi[["WGI"]][wgi["ISO3"] == st].values[0][0]
-        percent_ofExports = ACountryTotalExp / totalExportsOfProdtoNLD
+        ACountryTotalExp = oneProd['Value'][(oneProd['Exporter'] == st) & (oneProd['Importer'] == country_name)].sum()
+        wgi_mult_cntry = wgi[["WGI_2022xxx"]][wgi["ISO3"] == st].values[0][0]
+        percent_ofExports = ACountryTotalExp / totalExportsOfProdtocountry
         wgi_weight_cntry =  percent_ofExports * wgi_mult_cntry
         wgi_total.append(wgi_weight_cntry.tolist()[0])
 
@@ -375,15 +431,15 @@ def WGI_calc(data, product,  wgi, country_name = 'NLD', verbose = False):
 
     if verbose:
         print(" Product: ", product,
-            "\n WGI_forProducut: ", total_wgi,
-            "\n Top three exporters: ", largestExporterstoNLD.index.tolist()[0:3])
+            "\n WGI_forProduct: ", total_wgi,
+            "\n Top three exporters: ", largestExporterstocountry.index.tolist()[0:3])
 
-    return total_wgi, totalExportsOfProdtoNLD.Value, largestExporterstoNLD.index.tolist(), thesestatesmissing
+    return total_wgi, totalExportsOfProdtocountry.Value, largestExporterstocountry.index.tolist(), thesestatesmissing
 
-# x = WGI_calc(data, 80620, wgi1, "NLD",  verbose = False)
-# print(x)
+# test
+out = WGI_calc(test_data, 71332, WGI, "NLD",  verbose = True)
 
-def ImportDiversificationNLD(data, product, country_name = 'NLD', verbose = False):
+def ImportDiversificationcountry(data, product, country_name = 'NLD', verbose = False):
     '''
     Following CBS`: De indicator wordt als volgt berekend: neem voor ieder land dat dit product exporteert het aandeel van dit land in de wereldmarkt.
     NOTE:  I wasn't able to reproduce CBS's analysis, this is purely a application of the HHI index to NLD.
@@ -391,84 +447,90 @@ def ImportDiversificationNLD(data, product, country_name = 'NLD', verbose = Fals
 
     oneProd = data[data['Product'] == product]
 
-    ExporterOfProducttoNLD = oneProd['Exporter'][oneProd['Importer'] == country_name].unique()
+    ExporterOfProducttocountry = oneProd['Exporter'][oneProd['Importer'] == country_name].unique()
 
-    # fyi: largest exports in value to NLD
+    # fyi: largest exports in value to country
     Exports = oneProd[['Value', 'Exporter', 'Importer']]
-    largestExporterstoNLD = Exports[['Exporter', 'Value']][Exports['Importer'] == country_name].groupby(['Exporter']).sum()
-    largestExporterstoNLD = largestExporterstoNLD.sort_values(by = ['Value'], ascending=False)
-    totalExportsOfProdtoNLD = largestExporterstoNLD[["Value"]].sum()
+    largestExporterstocountry = Exports[['Exporter', 'Value']][Exports['Importer'] == country_name].groupby(['Exporter']).sum()
+    largestExporterstocountry = largestExporterstocountry.sort_values(by = ['Value'], ascending=False)
+    totalExportsOfProdtocountry = largestExporterstocountry[["Value"]].sum()
 
     # wrong for 2015
-    totalnumberofExportstoNLD = largestExporterstoNLD.shape[0]
-    #print('totalnumberofExportstoNLD:',  totalnumberofExportstoNLD)
+    totalnumberofExportstocountry = largestExporterstocountry.shape[0]
+    #print('totalnumberofExportstocountry:',  totalnumberofExportstocountry)
 
-    topthreeexportersinorder = largestExporterstoNLD.iloc[0:3, 0].index.tolist()
+    topthreeexportersinorder = largestExporterstocountry.iloc[0:3, 0].index.tolist()
 
     # if one country supplies more than 50% of value
-    percentonecountry = 100 * (largestExporterstoNLD.iloc[0:1, 0].sum()/totalExportsOfProdtoNLD).values[0]
-    percenttwocountry = 100 * (largestExporterstoNLD.iloc[0:2, 0].sum()/totalExportsOfProdtoNLD).values[0]
+    percentonecountry = 100 * (largestExporterstocountry.iloc[0:1, 0].sum()/totalExportsOfProdtocountry).values[0]
+    percenttwocountry = 100 * (largestExporterstocountry.iloc[0:2, 0].sum()/totalExportsOfProdtocountry).values[0]
     
     # get % top three
-    if largestExporterstoNLD.shape[0] >= 3:
-        valuetopthree_ifthree = 100*(largestExporterstoNLD.iloc[0:3, 0].sum()/totalExportsOfProdtoNLD)
+    if largestExporterstocountry.shape[0] >= 3:
+        valuetopthree_ifthree = 100*(largestExporterstocountry.iloc[0:3, 0].sum()/totalExportsOfProdtocountry)
     else:
-        valuetopthree_ifthree = 100*(largestExporterstoNLD.iloc[0:1, 0].sum()/totalExportsOfProdtoNLD)
+        valuetopthree_ifthree = 100*(largestExporterstocountry.iloc[0:1, 0].sum()/totalExportsOfProdtocountry)
 
     # MUST BE PER-COUNTRY
     # use float here
-    s2_total = 0
-    for st in ExporterOfProducttoNLD:
+    running_total = 0
+    for st in ExporterOfProducttocountry:
         ACountryTotalExp = oneProd['Value'][(oneProd['Exporter'] == st) & (oneProd['Importer'] == country_name)].sum()
-        s2 = np.power(ACountryTotalExp/totalExportsOfProdtoNLD, 2)
-        s2_total = s2_total + s2
+        tt = np.power(ACountryTotalExp/totalExportsOfProdtocountry, 2)
+        running_total = running_total + tt
 
     if verbose:
         print(" Product: ", product,
-              "\n ImportDiversificationNLD: ", s2_total,
-              "\n Top three exporters: ", largestExporterstoNLD.index.tolist()[0:3])
+              "\n ImportDiversificationcountry: ", running_total,
+              "\n Top three exporters: ", largestExporterstocountry.index.tolist()[0:3])
 
     # ugly code to account for diffeences in values and arrays, must be a better way
-    if type(s2_total) == pd.core.series.Series:
-        s2_total = s2_total.array[0]
+    if type(running_total) == pd.core.series.Series:
+        running_total = running_total.array[0]
 
-    return s2_total, valuetopthree_ifthree['Value'], totalnumberofExportstoNLD, percentonecountry, percenttwocountry, topthreeexportersinorder
+    return running_total, valuetopthree_ifthree['Value'], totalnumberofExportstocountry, percentonecountry, percenttwocountry, topthreeexportersinorder
 
+# test
+ImportDiversificationcountry(test_data, 71332, country_name = 'JPN', verbose = True)
 
-def add_hhi_tostrategic():
-    yearsData = np.arange(1995, 2023, step=1)
+def add_hhi_tostrategic(STRATEGICGOODS, country_name = "NLD"):
+    '''Function loops over all baci years for a country (only tested with NLD for now)'''
+    yearsData = np.arange(1995, 2000, step=1)
     yearsdata = []
     for yr in yearsData:
         print(yr)
         data = bc1.readindata(bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y"+ str(yr) + "_V202401.csv")
         data = bc1.addregions(data)
-        data = bc1.subsetStrategicGoods(data, STRATEGOODS)
-        data = data[data['Importer'] == "NLD"]
+        data = bc1.subsetStrategicGoods(data, STRATEGICGOODS)
+        data = data[data['Importer'] == country_name]
 
         collecthhis = []
         for prd in data['Product'].unique():
-            out, valuetopthree, totalnumberofExportstoNLD, percentonecountry, percenttwocountry, topthreeexportersinorder = ImportDiversificationNLD(data, prd, verbose = False)
+            out, valuetopthree, totalnumberofExportstoNLD, percentonecountry, percenttwocountry, topthreeexportersinorder = ImportDiversificationcountry(data, prd, verbose = False)
             collecthhis.append([prd, out, valuetopthree, totalnumberofExportstoNLD, percentonecountry, percenttwocountry, topthreeexportersinorder])
 
         df1 = pd.DataFrame(collecthhis)
         df1.columns = ['Product', 'HHI', 'Percenttopthree_ifthree', 'totalnumberofExportstoNLD', 'percentonecountry', 'percenttwocountry', 'topthreeexportersinorder']
-        print(df1)
-
+       
         data = data.merge(df1, left_on="Product", right_on="Product")
 
         yearsdata.append(data)
 
-    return yearsdata
+    out = pd.concat(yearsdata)
+    out.to_csv("HHI_concentration.csv", index=False)
+    
+    return out
 
-# out = add_hhi_tostrategic()
-# out = pd.concat(out)
-# out.to_csv("HHI_concentration.csv")
+# test
+add_hhi_tostrategic(STRATEGICGOODS, country_name = "NLD")
 
+# # above takes a long time to run, so I save it so I don't have to run the above code too often
 hhi = pd.read_csv("HHI_concentration.csv")
 hhi['LargestExporter'] = [literal_eval(x)[0] for x in hhi['topthreeexportersinorder']]
+# add WGI
 hhi_wgi = hhi.merge(WGI, left_on="LargestExporter", right_on="ISO3")
 hhi_wgi.drop(columns = ["ISO3"], inplace = True)
-hhi_wgi.to_csv("hhi_wgi.csv")
+hhi_wgi.to_csv("hhi_wgi.csv", index=False)
 
 def avgoverregions_HHI():
     data = pd.read_csv("hhi_wgi.csv")
@@ -476,11 +538,7 @@ def avgoverregions_HHI():
     mean_perregion_HHI = data[['HHI', 'code']].groupby(['code']).mean()
     mean_perregion_HHI.sort_values(['HHI'], ascending = False, inplace = True)
     mean_perregion_HHI.to_csv("mean_perregion_HHI.csv")
-
-#avgoverregions_HHI()
-
-# select HHI greater than x and value greater than y
-# has the HHI become worse
+avgoverregions_HHI()
 
 def plothhithroughtime():
     data = pd.read_csv("hhi_wgi.csv")    
@@ -537,9 +595,8 @@ def plothhithroughtime():
     print(t1.sort_values("Value"))
     plt.legend(loc="upper left",  fontsize="6") 
     plt.savefig(r"output\hhicommodities",bbox_inches='tight')
-    #plt.show()
-
-# plothhithroughtime()
+    plt.show()
+plothhithroughtime()
  
 def allsellersthroughtime():
     
@@ -599,13 +656,11 @@ def allsellersthroughtime():
     print(t1.sort_values("Value"))
     plt.legend(loc="upper left",  fontsize="6") 
     plt.savefig(r"output\numberimporters",bbox_inches='tight')
-    #plt.show()
+    plt.show()
 
     return allnumbersellers
+allsellersthroughtime()
 
-# allsellersthroughtime()
-
-# are the countries policitally stable
 def wgimeasure(prodname):
 
     plt.rcParams['figure.figsize'] = 10, 7
@@ -623,24 +678,26 @@ def wgimeasure(prodname):
         data1 = data[data['description'].isin(selectthese)]
 
     data2 = data1[['Year', 'Value', 'Exporter', 'Product']]
-    data3 = data2.merge(WGI, left_on = "Exporter", right_on = "ISO3")    
- 
+    data3 = data2.merge(WGI, left_on = "Exporter", right_on = "ISO3") 
+    uuu = data3[data3['Product'] == '282200']
+    uuu.to_csv("uuu.csv")
+
     allyrs = []
     for yr in data3['Year'].unique():
         datayr = data3[data3["Year"] == yr]
         allprod = []
-        for prd in datayr['Product'].unique():
+        namescol = []
+        for prd in data3['Product'].unique():
             datayrprod = datayr[datayr['Product'] == prd]
             valueprod = datayrprod['Value'].sum()
-            datayrprod['product'] = (datayrprod['WGI_2022xxx'] * datayrprod['Value'])/valueprod
+            datayrprod['product'] = datayrprod['WGI_2022xxx'] * (datayrprod['Value']/valueprod)
             wdisum = datayrprod['product'].sum()
             allprod.append(wdisum)
-    
+            namescol.append(prd)
         allyrs.append(allprod)
-        
-    
+   
     data = pd.DataFrame(data = allyrs, index = data3['Year'].unique())
-    data.columns = datayr['Product'].unique()
+    data.columns = namescol
 
     ################################
     ################################
@@ -652,6 +709,7 @@ def wgimeasure(prodname):
 
         name_column = data.columns[i]
         plt.plot(data.index, data.iloc[:,i], label = name_column)
+        plt.ylabel("WGI")
         plt.text(2022, end_value, name_column + " " + str("{:.2f}".format(end_value)), fontsize = 6)
         plt.title("Value weighted WGI per product per year for " + prodname)
         
@@ -661,12 +719,8 @@ def wgimeasure(prodname):
     plt.savefig(r"output\wgiweighted" + prodname,bbox_inches='tight')
 
     return data
-
-xyz = wgimeasure(prodname = 'Lithium')
-print(xyz)
-
-
-
+out1 = wgimeasure(prodname = 'Cobalt')
+print(out1)
 
 
 def wgicountries():
@@ -680,27 +734,24 @@ def wgicountries():
     # hhi through time avg all Dutch WGI (not necessary, only one year of data)
     avgWGI = data[['WGI_2022xxx', 'Year']].groupby(['Year']).mean()
 
-    theseitems = ['Lithium'] #, 'Cobalt', 'Zinc', 'Aluminium', 'Nickel', 'Copper']
+    theseitems = ['Lithium', 'Cobalt', 'Zinc', 'Aluminium', 'Nickel', 'Copper']
     
     allitems = []
     for i in theseitems:
         print(str.lower(i))
         selectthese = [x for x in data['description'] if i in x or str.lower(i) in x]
         data1 = data[data['description'].isin(selectthese)]
-        data1.to_csv("abc.csv")
         meanx = data1[['WGI_2022xxx', 'Year']].groupby(['Year']).mean()
         stdx = data1[['WGI_2022xxx', 'Year']].groupby(['Year']).std()
         allitems.append(pd.concat([meanx, stdx], axis=1))
        
     data = pd.concat(allitems)
-    data.columns = ['Mean', 'Std']
+    data['items'] = [val for val in theseitems for _ in (0, 1)]
+    data.columns = ['Item', 'Mean', 'Std']
     return data
 
-#xx = wgicountries()
-#print(xx)
-#xx.to_csv("tmp222222.csv")
-
-# take the lowest level of aggregation for one product group
+out1 = wgicountries()
+print(out1)
 
 def lithium():
     data = pd.read_csv("hhi_wgi.csv")    
@@ -723,34 +774,23 @@ def lithium():
         valueperproduct.to_csv("tmx.csv")
         valueperproduct['Exporter1'] = valueperproduct.index
         percountry = valueperproduct[['Exporter1', 'Value']].groupby(['Exporter']).sum()
-        percountry.to_csv("tmxx.csv")
 
         allitems.append(pd.concat([numberofproductsperyear]))
     data = pd.concat(allitems, axis=1)
     data.columns = theseitems
     return data
 
-#lithium()
+out1 = lithium()
+print(out1)
 
-
-
-
-# look at most valuable products, assess hhi
-
-# def combinehhiwgi_shortdescrip():
-#     data = pd.read_csv("hhi_wgi.csv")
-#     prod_h6 = pd.read_csv(r"src\baci\data\hs6twodigits.csv", dtype = str)
-
-#     data.merge(prod_h6, left_on="Producut")
-
-# from which regions to the Dutch get, value of imports per region 
 def dutchimportsregionthroughtime():
-    yearsData = np.arange(1995, 2023, step=1)
+    yearsData = np.arange(1995, 2000, step=1)
     yearsdata = []
     for yr in yearsData:
+        print(yr)
         data = bc1.readindata(bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y"+ str(yr) + "_V202401.csv")
         data = bc1.addregions(data)
-        data = bc1.subsetStrategicGoods(data, STRATEGOODS)
+        data = bc1.subsetStrategicGoods(data, STRATEGICGOODS)
         data = data[data['Importer'] == "NLD"]
         data = data[['Value', 'Exporter_sub_region']]
         gp1 = data[['Value', 'Exporter_sub_region']].groupby(['Exporter_sub_region']).sum()
@@ -760,25 +800,16 @@ def dutchimportsregionthroughtime():
         gp1 = gp1.pivot(index = 'Year', columns = 'subregion', values = 'Value')
         yearsdata.append(gp1)
 
-    return yearsdata
+    dt1 = pd.concat(yearsdata)
+    dt1.to_csv("sumperregion.csv")
 
-# dt1 = dutchimportsregionthroughtime()
-# dt1 = pd.concat(dt1)
-# print(dt1)
-# dt1.to_csv("sumperregion.csv")
+    return dt1
 
-# data = pd.read_csv("sumperregion.csv", index_col=[0])
-# data.drop(columns=["Micronesia", "Melanesia", "Polynesia"], inplace=True)
-# np.log(data).plot()
-# plt.show()
-
-################################################
-# Ideas
-# How have how has the vulnerability of a product that the Netherlands imports change through time
-# based on the HHI through time.
-# Look at value of imports through time.  
-# Histogram of WGI value
-# 
+dt1 = dutchimportsregionthroughtime()
+data = pd.read_csv("sumperregion.csv", index_col=[0])
+data.drop(columns=["Micronesia", "Melanesia", "Polynesia"], inplace=True)
+np.log(data).plot()
+plt.show()
 
 def compareDutchimportperregion(data):
     plt.rcParams['figure.figsize'] = 10, 7
@@ -814,12 +845,12 @@ def compareDutchimportperregion(data):
 # data.drop(columns=["Micronesia", "Melanesia", "Polynesia"], inplace=True)
 # compareDutchimportperregion(data)
 
-def regionalexportersdetail():
+def regionalexportersdetail(STRATEGICGOODS):
     ## Northern Europe
     yr = 2022
     data = bc1.readindata(bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y"+ str(yr) + "_V202401.csv")
     data = bc1.addregions(data)
-    data = bc1.subsetStrategicGoods(data, STRATEGOODS)
+    data = bc1.subsetStrategicGoods(data, STRATEGICGOODS)
     data = data[data['Importer'] == "NLD"]
     data = bc1.addshortdescriptoProdname(data)
     data = data[['Value', 'Exporter_sub_region', 'code']]
@@ -834,23 +865,23 @@ def regionalexportersdetail():
         data1.sort_values('Value', ascending = False, inplace = True)
         topthreeperregion.append(data1.iloc[0:2,:])
         
-    pd.concat(topthreeperregion).to_csv("tmp12.csv")
-
-# regionalexportersdetail()
+    out1 = pd.concat(topthreeperregion).to_csv("tmp.csv")
+    return None
+regionalexportersdetail(STRATEGICGOODS)
 
 # relative to other countries, how much have imports of strategic goods increased through time.  To compare with other countrie, remove the effects of gdp
 # first, get top trader importers in terms of total trade
 # Or, just look at the trade of strategic goods as a proportion of total imports or gdp   
 
-# for netherlads, group by subcategories, see though time
-def dutchbreakdown():
-    yearsData = np.arange(1995, 2023, step=1)
+# for netherlands, group by subcategories, see though time
+def dutchbreakdown(STRATEGICGOODS):
+    yearsData = np.arange(1995, 2000, step=1)
     yearsdata = []
     for yr in yearsData:
         print(yr)
         data = bc1.readindata(bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y"+ str(yr) + "_V202401.csv")
         data = bc1.addregions(data)
-        data = bc1.subsetStrategicGoods(data, STRATEGOODS)
+        data = bc1.subsetStrategicGoods(data, STRATEGICGOODS)
         data = bc1.addshortdescriptoProdname(data)
         data = data[data['Importer'] == "NLD"]
         
@@ -862,12 +893,12 @@ def dutchbreakdown():
     
     return yearsdata        
 
-# dutchbycode = dutchbreakdown()
-# dutchbycode = pd.concat(dutchbycode)
-# dutchbycode.set_index("Year", inplace = True)
-# dutchbycode.to_csv("dutchbycode.csv")
-# np.log(dutchbycode).plot()
-# plt.show()
+dutchbycode = dutchbreakdown(STRATEGICGOODS)
+dutchbycode = pd.concat(dutchbycode)
+dutchbycode.set_index("Year", inplace = True)
+dutchbycode.to_csv("dutchbycode.csv")
+np.log(dutchbycode).plot()
+plt.show()
 
 def plotdutchbycode():
     plt.rcParams['figure.figsize'] = 10, 6
@@ -902,7 +933,7 @@ def plotdutchbycode():
     plt.title("Log Value Dutch Imports per Strategic HS6 2-digit category)")
     plt.legend(loc="upper left",  fontsize="7") 
     plt.savefig("output\logvaluedutchimports",bbox_inches='tight')
-#plotdutchbycode()
+plotdutchbycode()
 
 def toptraders2022():
     dt1 = bc1.readindata("C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y2022_V202401.csv")
@@ -911,10 +942,9 @@ def toptraders2022():
     dt3 = dt2.sort_values(['Value'], ascending=False)
     
     return dt3.index
-#toptraders = toptraders2022().tolist()
 
 def slowmethodtogetregressiondata():
-    yearsData = np.arange(1995, 2023, step=1)
+    yearsData = np.arange(1995, 2000, step=1)
     Country = toptraders[0:19]
     allCountries = []
     for st in Country:
@@ -922,7 +952,7 @@ def slowmethodtogetregressiondata():
         allyearsdata = []
         for yr in yearsData:
             data = bc1.readindata(bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y"+ str(yr) + "_V202401.csv")
-            data = bc1.subsetStrategicGoods(data, STRATEGOODS)
+            data = bc1.subsetStrategicGoods(data, STRATEGICGOODS)
             data = bc1.add_gdp(data, GDP, str(yr))
             data = data[data['Importer'] == st]    
             gdp = data[str(yr) + '_gdp_Importer'].to_list()[0]
@@ -936,7 +966,8 @@ def slowmethodtogetregressiondata():
         df.to_csv('regressionData.csv', mode='a', index=False, header=False )
 
 def regressiondata():
-    yearsData = np.arange(1995, 2023, step=1)
+    toptraders = toptraders2022().tolist()
+    yearsData = np.arange(1995, 2000, step=1)
     allyears = []
     Country = toptraders[0:110] 
     for yr in yearsData:
@@ -953,7 +984,7 @@ def regressiondata():
         ######################
         # strategic
         ######################
-        strategic = bc1.subsetStrategicGoods(data, STRATEGOODS)
+        strategic = bc1.subsetStrategicGoods(data, STRATEGICGOODS)
         strategic = bc1.add_gdp(strategic, GDP, str(yr))
         strategic = strategic[strategic['Importer'].isin(Country)]
         gdpsub = strategic[['Importer', str(yr) + '_gdp_Importer']]
@@ -983,10 +1014,10 @@ def regressiondata():
 
     return allyears
 
-# data = regressiondata()
-# regressiondata = pd.concat(data)
-# regressiondata.sort_values(['Importer', 'Year'], inplace=True)
-# regressiondata.to_csv("regressionData.csv", index = False)
+data = regressiondata()
+regressiondata = pd.concat(data)
+regressiondata.sort_values(['Importer', 'Year'], inplace=True)
+regressiondata.to_csv("regressionData.csv", index = False)
 
 def augmentregressiondata():
     data = pd.read_csv("regressionData.csv", index_col=[0])
@@ -1022,10 +1053,10 @@ def augmentregressiondata():
     newdata = pd.concat(recollectalldata)
     newdata.to_csv("regressionDataAugmented.csv")
 
+# augmentregressiondata()
 # Which countries have had higher than average 
-# newdata = pd.read_csv('regressionDataAugmented.csv', index_col=[0])
-# newdata['Year'] = newdata.index
-# print(newdata)
+newdata = pd.read_csv('regressionDataAugmented.csv', index_col=[0])
+newdata['Year'] = newdata.index
 
 def plotdifferences(whichcomparison, whichstates, newdata, logornot = False):
     plt.rcParams['figure.figsize'] = 10, 6
@@ -1067,11 +1098,13 @@ def plotdifferences(whichcomparison, whichstates, newdata, logornot = False):
     plt.legend(loc="upper left",  fontsize="7") 
     plt.savefig("output\percentageofImports",bbox_inches='tight')
 
-
-# whichcomparison = 'percentStratofGDP'
-# whichcomparison = 'percentStratofImports'
-# whichstates = toptraders[0:10]
-# plotdifferences(whichcomparison, whichstates, newdata, logornot = False)
+whichcomparison = 'percentStratofGDP'
+whichcomparison = 'percentStratofImports'
+toptraders = toptraders2022().tolist()
+whichstates = toptraders[0:10]
+newdata = pd.read_csv('regressionDataAugmented.csv', index_col=[0])
+newdata['Year'] = newdata.index
+plotdifferences(whichcomparison, whichstates, newdata, logornot = False)
 
 ###################
 #countries with highest/lowest average percentgdp
@@ -1084,8 +1117,8 @@ def percentgdptopbottom():
     whichcomparison = 'percentStratofGDP'
     whichstates = statehighestpercentGDP
     plotdifferences(whichcomparison, whichstates, newdata)
-# percentgdptopbottom()
-# get number of rows, assign labels highest, high, average, low, lowest
+percentgdptopbottom()
+
 
 def addcategorical(data: pd.DataFrame):
     repeatthese = ['highest', 'second', 'third', 'fourth', 'average', 'sixth', 'seventh', 'eighth', 'nineth', 'lowest']
@@ -1095,10 +1128,10 @@ def addcategorical(data: pd.DataFrame):
     perstateGDP['rankStratperGDP'] = pd.Series(repeatthese).repeat(repeaters).tolist()
     return perstateGDP
 
-# perstateGDP = newdata[['state', 'percentStratofGDP']].groupby(['state']).sum()
-# b1 = perstateGDP.sort_values(['percentStratofGDP'], ascending=False, inplace=True)
-# b2 = addcategorical(b1)
-# print(b2.groupby('rankStratperGDP').mean())
+perstateGDP = newdata[['state', 'percentStratofGDP']].groupby(['state']).sum()
+b1 = perstateGDP.sort_values(['percentStratofGDP'], ascending=False, inplace=True)
+b2 = addcategorical(b1)
+print(b2.groupby('rankStratperGDP').mean())
 
 def percenttradetopbottom():
     highestpercentpercentStrat = newdata[['percentStratofImports', 'state']].groupby('state').mean()
@@ -1108,9 +1141,9 @@ def percenttradetopbottom():
     whichcomparison = 'percentStratofImports'
     whichstates = statehighestpercentImports
     plotdifferences(whichcomparison, whichstates, newdata)
-#percenttradetopbottom()
-# newdata = pd.read_csv('regressionDataAugmented.csv', index_col=[0])
-# newdata['Year'] = newdata.index
+percenttradetopbottom()
+newdata = pd.read_csv('regressionDataAugmented.csv', index_col=[0])
+newdata['Year'] = newdata.index
 
 # the idea, after having taken into account changes in gdp along with a time trend, how much has the purchase of strategic goods increased.
 # the residuals show us the change in purchases of strategic goods after having removed or reduced the effects of changes in a state's GDP.
@@ -1145,28 +1178,28 @@ def regressiongdp(data):
 
     return allstateresids, allresidscoef
 
-# rg1, coef = regressiongdp(newdata)
-# allresids = pd.concat(rg1)
-# allcoef = pd.concat(coef)
-# print(allresids)
-# print(allcoef)
-# allcoef.to_csv("allcoef.csv")
-# allresids.to_csv("allresids.csv")
+rg1, coef = regressiongdp(newdata)
+allresids = pd.concat(rg1)
+allcoef = pd.concat(coef)
+print(allresids)
+print(allcoef)
+allcoef.to_csv("allcoef.csv")
+allresids.to_csv("allresids.csv")
 
-# allresids = pd.read_csv("allresids.csv", index_col=[0])
+allresids = pd.read_csv("allresids.csv", index_col=[0])
 
-# # which states have shown positive increases in percent
-# print(allresids)
+# which states have shown positive increases in percent
+print(allresids)
 
-# for st in allresids['state'].unique():
-#     country = allresids[allresids['state'] == st]
+for st in allresids['state'].unique():
+    country = allresids[allresids['state'] == st]
 
-#     lastvalue = country.loc[2022, 'resids']
-#     if lastvalue < 0:
-#         print(st)
-#         # calc decrease
-#         lasttwo = country.loc[[2021,2022], "resids"]
-#         print(((lasttwo.iloc[1] - lasttwo.iloc[0])/lasttwo.iloc[0])*100)
+    lastvalue = country.loc[2022, 'resids']
+    if lastvalue < 0:
+        print(st)
+        # calc decrease
+        lasttwo = country.loc[[2021,2022], "resids"]
+        print(((lasttwo.iloc[1] - lasttwo.iloc[0])/lasttwo.iloc[0])*100)
 
 
 # no significant change
@@ -1174,11 +1207,11 @@ def regressiongdp(data):
 
 def DutchThroughTime():
     print("Running Dutch through time")
-    yearsData = np.arange(1995, 2023, step=1)
+    yearsData = np.arange(1995, 2000, step=1)
     yearsdata = []
     for yr in yearsData:
         data = bc1.readindata(bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y"+ str(yr) + "_V202401.csv")
-        data = bc1.subsetStrategicGoods(data, STRATEGOODS)
+        data = bc1.subsetStrategicGoods(data, STRATEGICGOODS)
         data = bc1.addshortdescriptoProdname(data)
         data = data[data['Importer'] == "NLD"]
         data = data[['Value', 'code']]
@@ -1190,26 +1223,26 @@ def DutchThroughTime():
 
     return yearsdata
 
-# dt1 = DutchThroughTime()
-# dt1 = pd.concat(dt1)
-# dt1.to_csv("sumpercode.csv")
-# data = pd.read_csv("sumpercode.csv", index_col=[0])
+dt1 = DutchThroughTime()
+dt1 = pd.concat(dt1)
+dt1.to_csv("sumpercode.csv")
+data = pd.read_csv("sumpercode.csv", index_col=[0])
 
-# data.plot()
-# plt.show()
+data.plot()
+plt.show()
 
-# data = bc1.add_gdp(data, GDP, '2022')
+data = bc1.add_gdp(data, GDP, '2022')
 
-# bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y2022_V202401.csv"
-# data = bc1.readindata(bacidata, tmp_save=False)
-# data = bc1.subsetStrategicGoods(data, STRATEGOODS)
-# data = bc1.addshortdescriptoProdname(data)
+bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y2022_V202401.csv"
+data = bc1.readindata(bacidata, tmp_save=False)
+data = bc1.subsetStrategicGoods(data, STRATEGICGOODS)
+data = bc1.addshortdescriptoProdname(data)
 
-#data = bc1.strategicgoodExportingImportingregions(data, impexp = "Importer")
-# strategicproducts = bc1.typesofstrategicgoods(data)
-# print(strategicproducts)
+data = bc1.strategicgoodExportingImportingregions(data, impexp = "Importer")
+strategicproducts = bc1.typesofstrategicgoods(data)
+print(strategicproducts)
 
-# datalongdesc = bc1.addlongdescription(data)
+datalongdesc = bc1.addlongdescription(data)
 
 def barchartstrategicprod(strategicproducts):
     ax = strategicproducts[['Value']].plot.barh(stacked=False,  rot=0, cmap='tab20', figsize=(10, 7))
@@ -1223,7 +1256,7 @@ def selectsubcategories():
 
     bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y2022_V202401.csv"
     data = bc1.readindata(bacidata, tmp_save=False)
-    data = bc1.subsetStrategicGoods(data, STRATEGOODS)
+    data = bc1.subsetStrategicGoods(data, STRATEGICGOODS)
     data = bc1.addshortdescriptoProdname(data)
     data = bc1.addlongdescription(data)
     data = data[data['Importer'] == 'NLD']
@@ -1249,14 +1282,14 @@ def selectsubcategories():
 selectsubcategories()
 
 def selectsubcategories_thoughtime():
-    yearsData = np.arange(1995, 2023, step=1)
+    yearsData = np.arange(1995, 2000, step=1)
     yearly = []
     for i in yearsData:
         print(i)
         bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y" + str(i) + "_V202401.csv"
 
         data = bc1.readindata(bacidata, verbose = True, tmp_save = False)
-        data = bc1.subsetStrategicGoods(data, STRATEGOODS)
+        data = bc1.subsetStrategicGoods(data, STRATEGICGOODS)
         data = bc1.addshortdescriptoProdname(data)
         
         allprecious = data[data['code'] == "pearls, precious, semi-precious"]
@@ -1291,8 +1324,7 @@ def selectsubcategorieshroughtime(data):
 
     top3 = list(itertools.chain.from_iterable(top3throughtime))
     print(set(top3))
-
-# preciousthroughtime(prcmet)    
+preciousthroughtime(prcmet)    
 
 def standardizedrelative(data):
     prcmet = data.copy()
@@ -1316,8 +1348,7 @@ def standardizedrelative(data):
     standr.plot(title = "Standardized data, top volatility through time")
     plt.show()
     plt.savefig("output\Standardizeddatatopvolatility", bbox_inches='tight')
-
-# standardizedrelative(prcmet)
+standardizedrelative(prcmet)
 
 def netimportsCountry():
     bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y2022_V202401.csv"
@@ -1339,11 +1370,11 @@ def netimportsCountry():
     m1.to_csv('tmp.csv')
     return m1
 
-# n1 = netimportsCountry()
-# print(n1)
+n1 = netimportsCountry()
+print(n1)
 
 def allWorldImports():
-    yearsData = np.arange(1995, 2023, step=1)
+    yearsData = np.arange(1995, 2000, step=1)
     yearly = []
     for i in yearsData:
         print(i)
@@ -1356,7 +1387,7 @@ def allWorldImports():
         year  = df1['Year'].tolist()[0]
 
         # subset on strategic goods
-        st1 = bc1.subsetStrategicGoods(df1, STRATEGOODS)
+        st1 = bc1.subsetStrategicGoods(df1, STRATEGICGOODS)
 
         # doesn't make sense/impossible to distinguish between imports and exports
         strategic_world_value = st1['Value'].sum()
@@ -1372,12 +1403,12 @@ def allWorldImports():
 
     return data
 
-#data = allWorldImports()
-#print(data.head())
-#data = data.merge(GDP, left_index=True, right_index=True)
-#data['Percentage_Trade'] = ((data['trade_world_value'] * 2)/data['World']) * 100
-#data['Percentage_Trade'].plot(title="World")
-#data.to_csv("World.csv")
+data = allWorldImports()
+print(data.head())
+data = data.merge(GDP, left_index=True, right_index=True)
+data['Percentage_Trade'] = ((data['trade_world_value'] * 2)/data['World']) * 100
+data['Percentage_Trade'].plot(title="World")
+data.to_csv("World.csv")
 
 def plotofworlddata():
     world = pd.read_csv("World.csv")
@@ -1386,12 +1417,11 @@ def plotofworlddata():
     world[['trade_world_value', 'trade_world_quantity', 'strategic_world_value', 'strategic_world_quantity']].plot(title = "World trade and strategic strategic trade in values and quantities")
     plt.show()
     plt.savefig("output\worldtradestrategic.png")
+plotofworlddata()
 
-#plotofworlddata()
-# are there countries in which trade of strategic goods has grown relative to their trade
 def relativeIncreasePerCountry():
     print("TAKES TIME, GET COFFEE OR TEA AND PASTRY!")
-    yearsData = np.arange(1995, 2023, step=1)
+    yearsData = np.arange(1995, 2000, step=1)
     allyears = []
     for i in yearsData:
         print(i)
@@ -1410,7 +1440,7 @@ def relativeIncreasePerCountry():
             # subset on strategic goods
             #############
             
-            st_strat = bc1.subsetStrategicGoods(st, STRATEGOODS)
+            st_strat = bc1.subsetStrategicGoods(st, STRATEGICGOODS)
             st_strat = bc1.addshortdescriptoProdname(st_strat)
     
             # doesn't make sense/impossible to distinguish between imports and exports
@@ -1434,9 +1464,9 @@ def relativeIncreasePerCountry():
     
     return allyears
 
-# relativeCountry = relativeIncreasePerCountry()
-# relativeCountry = pd.concat(relativeCountry)
-# relativeCountry.to_csv("relativeCountry.csv")
+relativeCountry = relativeIncreasePerCountry()
+relativeCountry = pd.concat(relativeCountry)
+relativeCountry.to_csv("relativeCountry.csv")
 
 ############
 # compare to world average percentages
@@ -1462,12 +1492,12 @@ def addprecentages(data):
             allstatevalues.append(dt1)
     return allstatevalues
 
-# data = pd.read_csv("relativeCountry.csv")
-# print(data)
-# newdf1 = addprecentages(data)
-# newdf1 = pd.concat(newdf1)
-# print(newdf1)
-# newdf1.to_csv("allstatesprecious.csv")
+data = pd.read_csv("relativeCountry.csv")
+print(data)
+newdf1 = addprecentages(data)
+newdf1 = pd.concat(newdf1)
+print(newdf1)
+newdf1.to_csv("allstatesprecious.csv")
 
 def wrldstate(df1):
 
@@ -1557,9 +1587,9 @@ def getpercountryimports(state):
     print(swisstopten)
 
     #strategic codes
-    STRATEGOODS = getStrategicGoods()
+    stratgoods = getStrategicGoods()
 
-    print(set(swisstopten.index).intersection(set(STRATEGOODS)))
+    print(set(swisstopten.index).intersection(set(stratgoods)))
 
 # getpercountryimports('ISR')
 
@@ -1601,8 +1631,8 @@ def tradepercent(data):
     highestpercent_importers = g2.index.tolist()[0:24]
     return highestpercent_importers
 
-data = pd.read_csv("relativeCountry.csv")
-highestpercent_importers =  tradepercent(data)
+# data = pd.read_csv("relativeCountry.csv")
+# highestpercent_importers =  tradepercent(data)
 
 
 
@@ -1613,13 +1643,13 @@ highestpercent_importers =  tradepercent(data)
 ############################################################
 
 def closerlookattop25():
-    yearsData = np.arange(1995, 2023, step=1)
+    yearsData = np.arange(1995, 2000, step=1)
     allyears = []
     for j in yearsData:
         print(j)
         bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y" + str(j) + "_V202401.csv"
         data = bc1.readindata(bacidata, verbose = False, tmp_save = False)
-        data = bc1.subsetStrategicGoods(data, STRATEGOODS)
+        data = bc1.subsetStrategicGoods(data, STRATEGICGOODS)
         data = bc1.addshortdescriptoProdname(data)
 
         for i in highestpercent_importers:
@@ -1647,7 +1677,7 @@ def strategicImports(country):
         df1 = bc1.readindata(bacidata, tmp_save=True)
         
         # subset on strategic goods
-        df1 = bc1.subsetStrategicGoods(df1, STRATEGOODS)
+        df1 = bc1.subsetStrategicGoods(df1, STRATEGICGOODS)
 
         df_imp = bc1.subsetData(df1, [country], 'Importer', [])
         imp_quant = df_imp['Quantity'].sum()
@@ -1688,7 +1718,7 @@ def DutchImportsValuePerProd():
         df2 = bc1.subsetData(df1, ["NLD"], 'Importer', [])
         
         # subset on strategic goods
-        df2 = bc1.subsetStrategicGoods(df2, STRATEGOODS)
+        df2 = bc1.subsetStrategicGoods(df2, STRATEGICGOODS)
 
         #add short description
         df2 = bc1.addshortdescriptoProdname(df2)
