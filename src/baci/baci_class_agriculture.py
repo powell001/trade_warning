@@ -36,6 +36,9 @@ class baci:
         df1['q'].replace('NA', np.NaN, inplace=True)
         df1['q'] = df1['q'].astype(float)
 
+        #dimensions
+        #print("shape", df1.shape)
+
         # rename columns to make them meaningful
         df1.rename(columns={'t': 'Year', 'i': 'Exporter', 'j': 'Importer', 'k': 'Product', 'v': 'Value', 'q': 'Quantity'}, inplace=True)
 
@@ -53,8 +56,7 @@ class baci:
         if verbose:
             hcodes = [str(x)[0:2] for x in df1["Product"]]
             print(set(hcodes))
-            print(len(set(hcodes)))   
-            print("shape", df1.shape)
+            print(len(set(hcodes)))
 
         return df1
     
@@ -198,6 +200,48 @@ STRATEGOODS = getStrategicGoods()
 
 # ININTIALIZE object
 bc1 = baci()
+
+############################
+# Wheat
+############################
+
+def wheatthroughyears():
+
+    print("Running Dutch through time")
+    yearsData = np.arange(1995, 2023, step=1)
+    yearsdata = []
+    for yr in yearsData:
+        print(yr)
+        data = bc1.readindata(bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y"+ str(yr) + "_V202401.csv")
+    
+        # select these codes
+        allprods = pd.read_csv("src\\baci\\various_codes\\product_codes_HS17_V202301.csv")
+        # contain wheat
+        selectthese = [x for x in allprods['description'] if "wheat" in x or "Wheat" in x]
+        # get code
+        codes = allprods[allprods['description'].isin(selectthese)]['code']
+        # convert code to string
+        wheatcodes = [str(x) for x in codes.tolist()]
+        # these are the wheat products
+        dt1 = data[data['Product'].isin(wheatcodes)]
+
+        sumtraded = dt1[['Product', 'Value']].groupby(['Product']).sum()
+        
+        yearsdata.append(sumtraded)
+
+    return yearsdata
+
+
+# dt1 = wheatthroughyears()
+# dt1 = pd.concat(dt1, axis=1)
+
+# dt1.columns = np.arange(1995, 2023, step=1).tolist()
+# dt1.to_csv("tmp.csv")
+
+dt1 = pd.read_csv("tmp.csv", index_col=[0])
+dt1 = dt1.T
+dt1.plot(title="Wheat codes through time")
+plt.show()
 
 def strategicgoodExportingImportingregions(impexp: str):
     bacidata = "C:\\Users\\jpark\\Downloads\\BACI_HS92_V202401\BACI_HS92_Y2022_V202401.csv"
